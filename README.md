@@ -23,27 +23,35 @@ The scanner is a data/query layer first. It is not an auto-trading system and do
 
 ## Current Status
 
-Initial scaffold is in progress.
+A working end-to-end premarket scan is in place (yfinance-only path, no API
+keys required). `python -m cli.scan_premarket` resolves a selection, builds a
+snapshot per ticker, computes the gap, applies filters, persists the run, and
+renders a table.
 
-Implemented so far:
+Implemented:
 
-- Project structure.
+- Project structure and packaging (installable with `pip install -e ".[dev]"`).
 - Environment configuration.
 - SQLite schema helpers.
 - Data models and provider interfaces.
 - Universe and watchlist YAML loader.
-- yfinance, Alpaca, and FMP provider adapter scaffolds.
+- yfinance, Alpaca, and FMP provider adapters.
+- Snapshot service combining providers into a single snapshot.
+- Confidence model (OK, LOW_CONFIDENCE, CONFLICT, STALE_DATA, MISSING_*, ERROR).
+- Gap scanner service with market-cap / gap / direction filters and persistence.
+- CLI: `list_universes` and `scan_premarket`.
+- Test suite covering gap math, filtering, sorting, and confidence labelling.
 - Default AI-related universes and personal watchlist example.
 
 Pending:
 
-- Asset/profile cache service.
-- Snapshot service.
-- Gap scanner service.
-- Confidence model implementation.
-- CLI commands.
-- Agent tool wrappers.
-- Tests.
+- Wire Alpaca cross-validation and FMP market caps into the scan by default.
+- `refresh_profiles` CLI for proactive profile/market-cap caching.
+- Agent-callable JSON tool wrappers (thin layer over the scanner service).
+- Snapshot history / staleness reporting commands.
+
+Note: Yahoo Finance must be reachable for the yfinance path. Some sandboxed or
+policy-restricted networks block it; run locally for live premarket data.
 
 ## Requirements
 

@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "premarket-agent-scanner"
 version = "0.1.0"
@@ -20,6 +24,9 @@ dependencies = [
 dev = [
     "pytest>=8.2.0",
 ]
+
+[tool.setuptools]
+packages = ["app", "cli", "services", "providers", "agent_tools"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

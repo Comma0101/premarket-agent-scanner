@@ -90,6 +90,7 @@ class CombinedSnapshot:
     confidence: Confidence
     sources: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    market_cap: float | None = None
     raw_yfinance_json: str | None = None
     raw_alpaca_json: str | None = None
     yfinance_data: ProviderPriceData | None = None
