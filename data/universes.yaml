@@ -1,0 +1,55 @@
+AI_WAVE_1_COMPUTE:
+  - NVDA
+  - AMD
+  - AVGO
+  - MRVL
+  - ARM
+  - TSM
+AI_WAVE_2_MEMORY_OPTICAL:
+  - MU
+  - WDC
+  - SNDK
+  - STX
+  - COHR
+  - LITE
+  - FN
+  - AAOI
+AI_WAVE_3_EQUIPMENT:
+  - AMAT
+  - LRCX
+  - KLAC
+  - ASML
+  - ASMI
+  - TOELY
+AI_WAVE_4_POWER_COOLING:
+  - VRT
+  - ETN
+  - GEV
+  - PWR
+  - HUBB
+  - FIX
+  - AAON
+  - MOD
+  - CEG
+  - SMR
+SERVER_INFRA:
+  - SMCI
+  - DELL
+  - HPE
+  - CRWV
+  - ORCL
+MAG7:
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMZN
+  - GOOGL
+  - META
+  - TSLA
+ETF_BENCHMARKS:
+  - SPY
+  - QQQ
+  - IWM
+  - SOXX
+  - SMH
+  - XLK
