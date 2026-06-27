@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.models import ScanFilters, ScannerResult
+from app.models import ScannerResult, make_scan_filters
 from services.scanner_service import ScannerService
 from services.snapshot_service import SnapshotService
 from services.universe_service import UniverseService
@@ -31,6 +31,7 @@ def _result_to_dict(result: ScannerResult) -> dict[str, Any]:
         "latest_price": result.latest_price,
         "gap_pct": result.gap_pct,
         "volume": result.volume,
+        "rel_volume": result.rel_volume,
         "confidence": result.confidence,
         "notes": result.notes,
         "sources": result.sources,
@@ -44,9 +45,12 @@ def scan_premarket(
     watchlist: str | None = None,
     tickers: str | None = None,
     all_universes: bool = False,
+    cap_tier: str | None = None,
     min_market_cap: float = 0,
     max_market_cap: float | None = None,
     min_gap_abs: float = 0,
+    min_volume: float | None = None,
+    min_rel_volume: float | None = None,
     direction: str = "both",
     only_confident: bool = False,
     service: ScannerService | None = None,
@@ -59,13 +63,19 @@ def scan_premarket(
             "error": "Provide at least one of: universe, watchlist, tickers, or all_universes."
         }
 
-    filters = ScanFilters(
-        min_market_cap=min_market_cap or 0,
-        max_market_cap=max_market_cap,
-        min_gap_abs=min_gap_abs or 0,
-        direction=direction,  # type: ignore[arg-type]
-        include_low_confidence=not only_confident,
-    )
+    try:
+        filters = make_scan_filters(
+            cap_tier=cap_tier,
+            min_market_cap=min_market_cap or 0,
+            max_market_cap=max_market_cap,
+            min_gap_abs=min_gap_abs or 0,
+            direction=direction,  # type: ignore[arg-type]
+            min_volume=min_volume,
+            min_rel_volume=min_rel_volume,
+            include_low_confidence=not only_confident,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
     scanner = service or ScannerService()
     output = scanner.scan(
         universe=universe,
@@ -110,7 +120,7 @@ def get_ticker_snapshot(
     if not ticker or not ticker.strip():
         return {"error": "ticker is required."}
 
-    from services.scanner_service import compute_gap_pct
+    from services.scanner_service import compute_gap_pct, compute_rel_volume
 
     svc = snapshot_service or SnapshotService()
     snap = svc.build_snapshot(ticker)
@@ -123,6 +133,7 @@ def get_ticker_snapshot(
         "gap_pct": compute_gap_pct(snap.previous_close, price),
         "market_cap": snap.market_cap,
         "volume": snap.volume,
+        "rel_volume": compute_rel_volume(snap.volume, snap.average_volume),
         "confidence": snap.confidence,
         "sources": snap.sources,
         "timestamp": snap.timestamp,

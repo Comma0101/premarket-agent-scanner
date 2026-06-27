@@ -7,8 +7,14 @@ confidence labelling, filtering, and sorting exactly as production would.
 
 from __future__ import annotations
 
-from app.models import ProviderPriceData, ScanFilters, utc_now_iso
-from services.scanner_service import ScannerService, compute_gap_pct
+from app.models import (
+    ProviderPriceData,
+    ScanFilters,
+    make_scan_filters,
+    resolve_cap_tier,
+    utc_now_iso,
+)
+from services.scanner_service import ScannerService, compute_gap_pct, compute_rel_volume
 from services.snapshot_service import SnapshotService
 from services.universe_service import UniverseService
 
@@ -28,7 +34,7 @@ class FakePriceProvider:
         )
 
 
-def _quote(ticker, prev, pre, cap, ts=None) -> ProviderPriceData:
+def _quote(ticker, prev, pre, cap, ts=None, vol=1_000_000, avg_vol=None) -> ProviderPriceData:
     ts = ts or utc_now_iso()  # fresh by default so rows are not flagged STALE
     return ProviderPriceData(
         ticker=ticker,
@@ -36,9 +42,9 @@ def _quote(ticker, prev, pre, cap, ts=None) -> ProviderPriceData:
         previous_close=prev,
         premarket_price=pre,
         latest_price=pre,
-        volume=1_000_000,
+        volume=vol,
         timestamp=ts,
-        raw={"marketCap": cap},
+        raw={"marketCap": cap, "averageVolume": avg_vol},
     )
 
 
@@ -113,3 +119,54 @@ def test_only_confident_drops_flagged_rows():
         tickers="X", filters=ScanFilters(include_low_confidence=False)
     )
     assert out.results == []
+
+
+def test_compute_rel_volume():
+    assert compute_rel_volume(3_000_000, 1_000_000) == 3.0
+    assert compute_rel_volume(1_000_000, None) is None
+    assert compute_rel_volume(None, 1_000_000) is None
+    assert compute_rel_volume(1_000_000, 0) is None
+
+
+def test_resolve_cap_tier_bounds():
+    assert resolve_cap_tier("small") == (300e6, 2e9)
+    assert resolve_cap_tier("MEGA") == (200e9, None)
+    try:
+        resolve_cap_tier("ginormous")
+    except ValueError as exc:
+        assert "Unknown cap tier" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_cap_tier_filters_small_cap_gappers():
+    quotes = {
+        # Small-cap gapper: $800M cap, +12%, high RVOL
+        "SMOL": _quote("SMOL", prev=10.0, pre=11.2, cap=8.0e8, vol=5_000_000, avg_vol=1_000_000),
+        # Large cap that also gapped — must be excluded by the small tier
+        "NVDA": _quote("NVDA", prev=100.0, pre=112.0, cap=3.0e12, vol=9_000_000, avg_vol=3_000_000),
+    }
+    filters = make_scan_filters(cap_tier="small", min_gap_abs=5.0, direction="up")
+    out = _service(quotes).scan(tickers="SMOL,NVDA", filters=filters)
+    assert [r.ticker for r in out.results] == ["SMOL"]
+    assert out.results[0].rel_volume == 5.0
+
+
+def test_min_rel_volume_filter():
+    quotes = {
+        "HOT": _quote("HOT", prev=10.0, pre=11.0, cap=5.0e8, vol=6_000_000, avg_vol=1_000_000),  # 6x
+        "COLD": _quote("COLD", prev=10.0, pre=11.0, cap=5.0e8, vol=1_200_000, avg_vol=1_000_000),  # 1.2x
+    }
+    filters = make_scan_filters(min_gap_abs=5.0, min_rel_volume=3.0)
+    out = _service(quotes).scan(tickers="HOT,COLD", filters=filters)
+    assert [r.ticker for r in out.results] == ["HOT"]
+
+
+def test_min_volume_filter_excludes_thin_names():
+    quotes = {
+        "LIQ": _quote("LIQ", prev=10.0, pre=11.0, cap=5.0e8, vol=4_000_000),
+        "THIN": _quote("THIN", prev=10.0, pre=11.0, cap=5.0e8, vol=50_000),
+    }
+    filters = make_scan_filters(min_gap_abs=5.0, min_volume=1_000_000)
+    out = _service(quotes).scan(tickers="LIQ,THIN", filters=filters)
+    assert [r.ticker for r in out.results] == ["LIQ"]

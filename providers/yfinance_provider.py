@@ -84,6 +84,11 @@ class YFinanceProvider:
                 "preMarketTime": info.get("preMarketTime"),
                 "marketCap": _num(info.get("marketCap")),
                 "volume": _num(info.get("volume")),
+                "averageVolume": (
+                    _num(info.get("averageVolume"))
+                    or _num(info.get("averageDailyVolume10Day"))
+                    or _num(info.get("averageVolume10days"))
+                ),
             }
 
             notes: list[str] = []

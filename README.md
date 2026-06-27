@@ -40,7 +40,9 @@ Implemented:
   Alpaca cross-validation that flags CONFLICT when sources disagree (auto-enabled
   when Alpaca keys are present; yfinance-only otherwise).
 - Confidence model (OK, LOW_CONFIDENCE, CONFLICT, STALE_DATA, MISSING_*, ERROR).
-- Gap scanner service with market-cap / gap / direction filters and persistence.
+- Gap scanner service with market-cap, gap, direction, volume, and
+  relative-volume (RVOL) filters, plus named cap tiers (nano/micro/small/mid/
+  large/mega) for small-cap vs large-cap gapper scans.
 - CLI: `list_universes`, `scan_premarket`, and `ask` (natural-language).
 - Agent-callable JSON tool layer (`agent_tools`): `scan_premarket`,
   `list_universes`, and `get_ticker_snapshot`, with Anthropic tool-use schemas,
@@ -119,6 +121,24 @@ python -m cli.scan_premarket \
   --min-gap-abs 3 \
   --direction both
 ```
+
+Gapper presets — small-cap and large-cap, with a relative-volume filter:
+
+```bash
+# Small-cap gappers up 5%+ on at least 2x average volume
+python -m cli.scan_premarket --all --cap-tier small \
+  --min-gap-abs 5 --direction up --min-rvol 2
+
+# Large-cap gappers up 2%+
+python -m cli.scan_premarket --all --cap-tier large \
+  --min-gap-abs 2 --direction up
+```
+
+Cap tiers: `nano` (<$50M), `micro` ($50M-$300M), `small` ($300M-$2B),
+`mid` ($2B-$10B), `large` ($10B-$200B), `mega` (>$200B). `--min-rvol` is
+relative volume (current volume ÷ average daily volume) — a key gapper-quality
+signal, especially for small caps. Small-cap scanning needs small-cap tickers in
+a universe or watchlist; add them in `data/universes.yaml`.
 
 List universes:
 

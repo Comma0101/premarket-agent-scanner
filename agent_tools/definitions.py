@@ -44,17 +44,37 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "boolean",
                     "description": "Scan every defined universe. Defaults to false.",
                 },
+                "cap_tier": {
+                    "type": "string",
+                    "enum": ["nano", "micro", "small", "mid", "large", "mega"],
+                    "description": (
+                        "Market-cap tier shortcut that sets the cap bounds: small (~$300M-$2B), "
+                        "mid ($2B-$10B), large ($10B-$200B), mega (>$200B), etc. Use this for "
+                        "'small cap gappers' or 'large cap gappers' instead of raw cap numbers."
+                    ),
+                },
                 "min_market_cap": {
                     "type": "number",
-                    "description": "Minimum market cap in USD (e.g. 10000000000 for $10B).",
+                    "description": "Minimum market cap in USD (e.g. 10000000000 for $10B). Overrides cap_tier's lower bound.",
                 },
                 "max_market_cap": {
                     "type": "number",
-                    "description": "Maximum market cap in USD.",
+                    "description": "Maximum market cap in USD. Overrides cap_tier's upper bound.",
                 },
                 "min_gap_abs": {
                     "type": "number",
                     "description": "Minimum absolute gap percent (e.g. 5 means at least 5% move either way).",
+                },
+                "min_volume": {
+                    "type": "number",
+                    "description": "Minimum traded volume in shares.",
+                },
+                "min_rel_volume": {
+                    "type": "number",
+                    "description": (
+                        "Minimum relative volume (RVOL = current volume / average daily volume). "
+                        "E.g. 2 means at least twice normal volume — a key small-cap gapper signal."
+                    ),
                 },
                 "direction": {
                     "type": "string",

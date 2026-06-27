@@ -86,6 +86,7 @@ class SnapshotService:
         volume = yf_data.volume
         timestamp = yf_data.timestamp
         market_cap = _num(yf_data.raw.get("marketCap")) if yf_data.raw else None
+        average_volume = _num(yf_data.raw.get("averageVolume")) if yf_data.raw else None
 
         if yf_data.error:
             notes.append(f"yfinance: {yf_data.error}")
@@ -137,6 +138,7 @@ class SnapshotService:
             alpaca_data=alpaca_data,
         )
         snapshot.market_cap = market_cap
+        snapshot.average_volume = average_volume
         return snapshot
 
     def _assign_confidence(

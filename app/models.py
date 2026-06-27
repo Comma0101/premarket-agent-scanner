@@ -91,6 +91,7 @@ class CombinedSnapshot:
     sources: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     market_cap: float | None = None
+    average_volume: float | None = None
     raw_yfinance_json: str | None = None
     raw_alpaca_json: str | None = None
     yfinance_data: ProviderPriceData | None = None
@@ -103,7 +104,60 @@ class ScanFilters:
     max_market_cap: float | None = None
     min_gap_abs: float | None = 0
     direction: Direction = "both"
+    min_volume: float | None = None
+    min_rel_volume: float | None = None
     include_low_confidence: bool = True
+
+
+# Market-cap tiers (USD). Upper bound is exclusive; None means no upper bound.
+CAP_TIERS: dict[str, tuple[float, float | None]] = {
+    "nano": (0, 50e6),
+    "micro": (50e6, 300e6),
+    "small": (300e6, 2e9),
+    "mid": (2e9, 10e9),
+    "large": (10e9, 200e9),
+    "mega": (200e9, None),
+}
+
+
+def resolve_cap_tier(name: str) -> tuple[float, float | None]:
+    key = name.strip().lower()
+    if key not in CAP_TIERS:
+        valid = ", ".join(CAP_TIERS)
+        raise ValueError(f"Unknown cap tier: {name}. Valid tiers: {valid}.")
+    return CAP_TIERS[key]
+
+
+def make_scan_filters(
+    *,
+    cap_tier: str | None = None,
+    min_market_cap: float | None = 0,
+    max_market_cap: float | None = None,
+    min_gap_abs: float | None = 0,
+    direction: Direction = "both",
+    min_volume: float | None = None,
+    min_rel_volume: float | None = None,
+    include_low_confidence: bool = True,
+) -> ScanFilters:
+    """Build ScanFilters, expanding a cap tier into market-cap bounds.
+
+    Explicit min_market_cap / max_market_cap take precedence over the tier.
+    """
+    if cap_tier:
+        tier_min, tier_max = resolve_cap_tier(cap_tier)
+        if not min_market_cap:
+            min_market_cap = tier_min
+        if max_market_cap is None:
+            max_market_cap = tier_max
+    return ScanFilters(
+        min_market_cap=min_market_cap or 0,
+        max_market_cap=max_market_cap,
+        min_gap_abs=min_gap_abs or 0,
+        direction=direction,
+        min_volume=min_volume,
+        min_rel_volume=min_rel_volume,
+        include_low_confidence=include_low_confidence,
+    )
 
 
 @dataclass
@@ -119,6 +173,7 @@ class ScannerResult:
     volume: float | None
     confidence: Confidence
     notes: str | None
+    rel_volume: float | None = None
     sources: list[str] = field(default_factory=list)
     timestamp: str | None = None
     created_at: str = field(default_factory=utc_now_iso)

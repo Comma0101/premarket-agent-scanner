@@ -47,6 +47,13 @@ def compute_gap_pct(previous_close: float | None, price: float | None) -> float 
     return round((price - previous_close) / previous_close * 100, 2)
 
 
+def compute_rel_volume(volume: float | None, average_volume: float | None) -> float | None:
+    """Relative volume (RVOL) = current volume / average daily volume."""
+    if volume is None or average_volume is None or average_volume == 0:
+        return None
+    return round(volume / average_volume, 2)
+
+
 class ScannerService:
     def __init__(
         self,
@@ -154,6 +161,8 @@ class ScannerService:
         if market_cap is None and confidence == "OK":
             confidence = "MISSING_MARKET_CAP"
 
+        rel_volume = compute_rel_volume(snapshot.volume, snapshot.average_volume)
+
         result = ScannerResult(
             ticker=ticker,
             name=name,
@@ -166,6 +175,7 @@ class ScannerService:
             volume=snapshot.volume,
             confidence=confidence,
             notes="; ".join(snapshot.notes) if snapshot.notes else None,
+            rel_volume=rel_volume,
             sources=snapshot.sources,
             timestamp=snapshot.timestamp,
         )
@@ -196,6 +206,14 @@ class ScannerService:
             return False
         if filters.min_gap_abs and abs(result.gap_pct) < filters.min_gap_abs:
             return False
+
+        # Volume filters. A missing value only excludes when the bound is set.
+        if filters.min_volume:
+            if result.volume is None or result.volume < filters.min_volume:
+                return False
+        if filters.min_rel_volume:
+            if result.rel_volume is None or result.rel_volume < filters.min_rel_volume:
+                return False
 
         return True
 
