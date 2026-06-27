@@ -20,6 +20,13 @@ dependencies = [
     "yfinance>=0.2.40",
 ]
 
+[project.optional-dependencies]
+# The conversational agent layer needs the Anthropic SDK + an API key.
+# Install with: pip install -e ".[agent]"
+agent = [
+    "anthropic>=0.69.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.2.0",

@@ -39,16 +39,34 @@ Implemented:
 - Snapshot service combining providers into a single snapshot.
 - Confidence model (OK, LOW_CONFIDENCE, CONFLICT, STALE_DATA, MISSING_*, ERROR).
 - Gap scanner service with market-cap / gap / direction filters and persistence.
-- CLI: `list_universes` and `scan_premarket`.
-- Test suite covering gap math, filtering, sorting, and confidence labelling.
+- CLI: `list_universes`, `scan_premarket`, and `ask` (natural-language).
+- Agent-callable JSON tool layer (`agent_tools`): `scan_premarket`,
+  `list_universes`, and `get_ticker_snapshot`, with Anthropic tool-use schemas,
+  a dispatcher that logs to `agent_queries`, and a Claude agent loop.
+- Test suite covering gap math, filtering, sorting, confidence labelling, the
+  JSON tools, and the agent tool-use loop (all offline).
 - Default AI-related universes and personal watchlist example.
 
 Pending:
 
 - Wire Alpaca cross-validation and FMP market caps into the scan by default.
 - `refresh_profiles` CLI for proactive profile/market-cap caching.
-- Agent-callable JSON tool wrappers (thin layer over the scanner service).
 - Snapshot history / staleness reporting commands.
+
+## Agent Layer
+
+Ask the scanner in plain English (requires the Anthropic SDK and an API key):
+
+```bash
+pip install -e ".[agent]"
+export ANTHROPIC_API_KEY=...   # add when ready
+python -m cli.ask "Which MAG7 names are gapping up over 1% premarket?"
+```
+
+The agent never invents numbers — every price, gap, market cap, and confidence
+label comes from the tool layer, which is a thin wrapper over the scanner. The
+JSON tools work and are tested without any API key; only the conversational
+`ask` command needs one.
 
 Note: Yahoo Finance must be reachable for the yfinance path. Some sandboxed or
 policy-restricted networks block it; run locally for live premarket data.
