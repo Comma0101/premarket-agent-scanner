@@ -23,27 +23,19 @@ The scanner is a data/query layer first. It is not an auto-trading system and do
 
 ## Current Status
 
-Initial scaffold is in progress.
+V1 data-layer functionality is implemented:
 
-Implemented so far:
-
-- Project structure.
-- Environment configuration.
-- SQLite schema helpers.
+- Project structure and environment configuration.
+- SQLite schema helpers and local API usage tracking.
 - Data models and provider interfaces.
 - Universe and watchlist YAML loader.
-- yfinance, Alpaca, and FMP provider adapter scaffolds.
-- Default AI-related universes and personal watchlist example.
-
-Pending:
-
-- Asset/profile cache service.
-- Snapshot service.
-- Gap scanner service.
-- Confidence model implementation.
-- CLI commands.
-- Agent tool wrappers.
-- Tests.
+- yfinance, Alpaca Free, and FMP Free provider adapters.
+- Asset/profile cache service with FMP-first and yfinance fallback behavior.
+- Snapshot service with yfinance primary premarket pricing and Alpaca IEX validation.
+- Gap calculation, filtering, session note, and confidence model.
+- CLI commands for listing universes, refreshing profiles, and scanning gaps.
+- Agent tool wrappers that return structured JSON.
+- Unit tests for gap calculation, filters, confidence, and universe loading.
 
 ## Requirements
 
@@ -57,7 +49,7 @@ The scanner should still run without Alpaca or FMP keys, but it will degrade to 
 ## Setup
 
 ```bash
-cd /Users/kuma./Workspace/premarket-agent-scanner
+cd premarket-agent-scanner
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -74,7 +66,7 @@ DATABASE_URL=sqlite:///data/market_data.sqlite
 DEFAULT_TIMEZONE=America/New_York
 ```
 
-## Planned CLI Usage
+## CLI Usage
 
 Refresh company profiles:
 
@@ -97,6 +89,16 @@ List universes:
 ```bash
 python -m cli.list_universes
 ```
+
+## Agent Tools
+
+The agent-callable functions live in `agent_tools/tools.py` and return dictionaries/lists rather than prose:
+
+- `scan_premarket_gaps({...})`
+- `explain_premarket_mover({...})`
+- `compare_universe_gaps({...})`
+
+Numeric values are passed through from provider/cache data. Missing values stay `null` in JSON-style outputs.
 
 ## Data Sources
 

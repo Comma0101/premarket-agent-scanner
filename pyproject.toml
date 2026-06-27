@@ -16,6 +16,11 @@ dependencies = [
     "yfinance>=0.2.40",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.2.0",
