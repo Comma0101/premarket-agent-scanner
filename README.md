@@ -36,7 +36,9 @@ Implemented:
 - Data models and provider interfaces.
 - Universe and watchlist YAML loader.
 - yfinance, Alpaca, and FMP provider adapters.
-- Snapshot service combining providers into a single snapshot.
+- Snapshot service combining providers into a single snapshot, with optional
+  Alpaca cross-validation that flags CONFLICT when sources disagree (auto-enabled
+  when Alpaca keys are present; yfinance-only otherwise).
 - Confidence model (OK, LOW_CONFIDENCE, CONFLICT, STALE_DATA, MISSING_*, ERROR).
 - Gap scanner service with market-cap / gap / direction filters and persistence.
 - CLI: `list_universes`, `scan_premarket`, and `ask` (natural-language).
@@ -49,7 +51,7 @@ Implemented:
 
 Pending:
 
-- Wire Alpaca cross-validation and FMP market caps into the scan by default.
+- Wire FMP market caps into the scan by default.
 - `refresh_profiles` CLI for proactive profile/market-cap caching.
 - Snapshot history / staleness reporting commands.
 

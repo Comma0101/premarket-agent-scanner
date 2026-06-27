@@ -57,7 +57,9 @@ class ScannerService:
         persist: bool = True,
     ) -> None:
         self.universe_service = universe_service or UniverseService()
-        self.snapshot_service = snapshot_service or SnapshotService()
+        # Default builds an Alpaca cross-check when keys are present; stays
+        # yfinance-only otherwise, so the no-key path is unchanged.
+        self.snapshot_service = snapshot_service or SnapshotService.with_configured_providers(db_path)
         self.db_path = db_path
         self.persist = persist
 

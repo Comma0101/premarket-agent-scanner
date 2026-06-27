@@ -34,6 +34,21 @@ class SnapshotService:
         # Alpaca is optional; passing None keeps the scanner yfinance-only.
         self.alpaca_provider = alpaca_provider
 
+    @classmethod
+    def with_configured_providers(cls, db_path: str | None = None) -> "SnapshotService":
+        """Build a snapshot service that cross-validates with Alpaca when keys exist.
+
+        Without Alpaca credentials this is identical to the default yfinance-only
+        service, so behavior is unchanged until an API key is provided.
+        """
+        from providers.alpaca_provider import AlpacaProvider
+
+        alpaca = AlpacaProvider(db_path=db_path)
+        return cls(
+            yf_provider=YFinanceProvider(),
+            alpaca_provider=alpaca if alpaca.is_configured else None,
+        )
+
     def build_snapshot(self, ticker: str) -> CombinedSnapshot:
         normalized = ticker.upper()
 
