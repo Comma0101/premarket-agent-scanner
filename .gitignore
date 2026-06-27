@@ -1,12 +1,6 @@
 .env
 .venv/
 __pycache__/
-.pytest_cache/
-.ruff_cache/
 *.pyc
-*.pyo
-*.pyd
-.DS_Store
-data/*.sqlite
-data/*.sqlite-*
-exports/
+.pytest_cache/
+data/market_data.sqlite
