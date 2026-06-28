@@ -214,6 +214,15 @@ class SmallCapCandidate:
 
 
 @dataclass
+class SmallCapScanOutput:
+    preset: str
+    run_ids: list[str]
+    candidate_count: int
+    candidates: list[SmallCapCandidate]
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
 class ScanRunOutput:
     run_id: str
     universe: str | None

@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from app.models import ScannerResult, SmallCapCandidate, SmallCapGrade
+from app.models import (
+    ScannerResult,
+    SmallCapCandidate,
+    SmallCapGrade,
+    SmallCapScanOutput,
+    make_scan_filters,
+)
+from services.scanner_preset_service import PresetService
+from services.scanner_service import ScannerService
 
 
 UNUSABLE_CONFIDENCE = {
@@ -10,6 +18,74 @@ UNUSABLE_CONFIDENCE = {
     "MISSING_PREVIOUS_CLOSE",
     "MISSING_PREMARKET_PRICE",
 }
+
+
+class SmallCapScannerService:
+    def __init__(
+        self,
+        scanner_service: ScannerService | None = None,
+        preset_service: PresetService | None = None,
+    ) -> None:
+        self.scanner_service = scanner_service or ScannerService()
+        self.preset_service = preset_service or PresetService()
+
+    def scan(
+        self,
+        *,
+        preset_name: str = "sykes_small_cap_v0",
+        universe: str | list[str] | None = None,
+        watchlist: str | list[str] | None = None,
+        tickers: list[str] | str | None = None,
+        all_universes: bool = False,
+    ) -> SmallCapScanOutput:
+        preset = self.preset_service.get_preset(preset_name)
+        run_ids: list[str] = []
+        notes = list(preset.notes)
+        candidates_by_ticker: dict[str, SmallCapCandidate] = {}
+
+        for cap_tier in preset.cap_tiers:
+            filters = make_scan_filters(
+                cap_tier=cap_tier,
+                min_gap_abs=preset.min_gap_abs,
+                direction=preset.direction,
+                min_volume=preset.min_volume,
+                min_rel_volume=preset.min_rel_volume,
+                include_low_confidence=preset.include_low_confidence,
+            )
+            scan_run = self.scanner_service.scan(
+                universe=universe,
+                watchlist=watchlist,
+                tickers=tickers,
+                all_universes=all_universes,
+                filters=filters,
+            )
+            run_ids.append(scan_run.run_id)
+            notes.extend(scan_run.notes)
+
+            for result in scan_run.results:
+                candidate = grade_small_cap_candidate(
+                    result,
+                    missing_fields=list(preset.missing_fields),
+                )
+                if candidate.grade == "REJECT":
+                    continue
+
+                existing = candidates_by_ticker.get(candidate.ticker)
+                if existing is None or candidate.score > existing.score:
+                    candidates_by_ticker[candidate.ticker] = candidate
+
+        candidates = sorted(
+            candidates_by_ticker.values(),
+            key=lambda candidate: candidate.score,
+            reverse=True,
+        )
+        return SmallCapScanOutput(
+            preset=preset.name,
+            run_ids=run_ids,
+            candidate_count=len(candidates),
+            candidates=candidates,
+            notes=notes,
+        )
 
 
 def grade_small_cap_candidate(
