@@ -1,9 +1,10 @@
-"""Anthropic tool-use schema definitions and the dispatcher.
+"""Tool-use schema definitions and the dispatcher.
 
-TOOLS is the list passed to ``client.messages.create(tools=...)``. Each entry is
-a standard tool definition: name, description, and a JSON Schema input_schema.
-Descriptions are prescriptive about *when* to call the tool — recent Claude
-models reach for tools more deliberately, so the trigger condition matters.
+TOOLS is the list of tool definitions (name, description, JSON-Schema
+input_schema) handed to whichever LLM drives the agent. The shape is the
+standard function-calling format used by Claude, OpenAI, Gemini, etc.
+Descriptions are prescriptive about *when* to call the tool — recent models
+reach for tools more deliberately, so the trigger condition matters.
 
 ``dispatch`` maps a tool name + parsed input to the matching function in
 tools.py, logs the call to the agent_queries table, and returns the JSON result.

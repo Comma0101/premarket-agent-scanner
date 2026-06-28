@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, is_dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
 
 
@@ -20,7 +20,7 @@ Direction = Literal["up", "down", "both"]
 
 
 def utc_now_iso() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def model_to_dict(value: Any) -> dict[str, Any]:
@@ -174,6 +174,7 @@ class ScannerResult:
     confidence: Confidence
     notes: str | None
     rel_volume: float | None = None
+    gap_dollar: float | None = None
     sources: list[str] = field(default_factory=list)
     timestamp: str | None = None
     created_at: str = field(default_factory=utc_now_iso)

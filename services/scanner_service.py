@@ -30,6 +30,7 @@ from app.models import (
     ScanRunOutput,
     utc_now_iso,
 )
+from services.profile_service import ProfileService
 from services.snapshot_service import SnapshotService
 from services.universe_service import UniverseSelection, UniverseService
 
@@ -40,11 +41,26 @@ _UNUSABLE_CONFIDENCE = {
     "MISSING_PREMARKET_PRICE",
 }
 
+# Sentinel so callers can explicitly pass profile_service=None to disable
+# profile enrichment (e.g. offline tests) without triggering the default.
+_UNSET = object()
+
 
 def compute_gap_pct(previous_close: float | None, price: float | None) -> float | None:
     if previous_close is None or price is None or previous_close == 0:
         return None
     return round((price - previous_close) / previous_close * 100, 2)
+
+
+def compute_gap_dollar(previous_close: float | None, price: float | None) -> float | None:
+    """Absolute dollar gap: price minus previous close.
+
+    Uses the same effective price as compute_gap_pct (premarket if present,
+    otherwise last trade) so the dollar and percent figures always agree.
+    """
+    if previous_close is None or price is None:
+        return None
+    return round(price - previous_close, 2)
 
 
 def compute_rel_volume(volume: float | None, average_volume: float | None) -> float | None:
@@ -59,6 +75,7 @@ class ScannerService:
         self,
         universe_service: UniverseService | None = None,
         snapshot_service: SnapshotService | None = None,
+        profile_service: Any = _UNSET,
         db_path: str | None = None,
         *,
         persist: bool = True,
@@ -69,6 +86,12 @@ class ScannerService:
         self.snapshot_service = snapshot_service or SnapshotService.with_configured_providers(db_path)
         self.db_path = db_path
         self.persist = persist
+        if profile_service is _UNSET:
+            # Profile enrichment only runs on the persisted (online) path so the
+            # default no-persist path stays network-free and side-effect-free.
+            self.profile_service = ProfileService(db_path=db_path) if persist else None
+        else:
+            self.profile_service = profile_service
 
     def scan(
         self,
@@ -149,12 +172,24 @@ class ScannerService:
             market_cap = snapshot.market_cap
             self._learn_market_cap(snapshot)
 
+        # The snapshot carries prices, not company names. Resolve a name (and
+        # any still-missing cap) from the profile cache/providers so the result
+        # is human-readable; without this the Name column is blank.
+        if (name is None or market_cap is None) and self.profile_service is not None:
+            profile = self._get_profile(ticker)
+            if profile is not None:
+                if name is None:
+                    name = profile.name
+                if market_cap is None:
+                    market_cap = profile.market_cap
+
         price = (
             snapshot.premarket_price
             if snapshot.premarket_price is not None
             else snapshot.latest_price
         )
         gap_pct = compute_gap_pct(snapshot.previous_close, price)
+        gap_dollar = compute_gap_dollar(snapshot.previous_close, price)
 
         membership = selection.memberships.get(ticker, [])
         confidence = snapshot.confidence
@@ -172,6 +207,7 @@ class ScannerService:
             premarket_price=snapshot.premarket_price,
             latest_price=snapshot.latest_price,
             gap_pct=gap_pct,
+            gap_dollar=gap_dollar,
             volume=snapshot.volume,
             confidence=confidence,
             notes="; ".join(snapshot.notes) if snapshot.notes else None,
@@ -225,6 +261,14 @@ class ScannerService:
                 return get_latest_assets(conn, tickers)
         except Exception:
             return {}
+
+    def _get_profile(self, ticker: str) -> AssetProfile | None:
+        if self.profile_service is None:
+            return None
+        try:
+            return self.profile_service.get_profile(ticker)
+        except Exception:
+            return None
 
     def _learn_market_cap(self, snapshot: CombinedSnapshot) -> None:
         if not self.persist or snapshot.market_cap is None:

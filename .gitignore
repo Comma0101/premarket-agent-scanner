@@ -10,6 +10,7 @@ __pycache__/
 data/*.sqlite
 data/*.sqlite-*
 exports/
+.omc/
 
 # Python build artifacts
 *.egg-info/

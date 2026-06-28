@@ -83,8 +83,10 @@ def test_missing_alpaca_credentials_falls_back_to_yfinance_only():
 
 
 def test_with_configured_providers_is_yfinance_only_without_keys(monkeypatch):
-    # No Alpaca env keys in the test environment -> alpaca provider not attached.
-    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
-    monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
+    # No Alpaca keys available -> alpaca provider not attached. Use empty strings
+    # rather than delenv so python-dotenv (override=False) cannot reload them
+    # from a real .env file in the test environment.
+    monkeypatch.setenv("ALPACA_API_KEY", "")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "")
     service = SnapshotService.with_configured_providers()
     assert service.alpaca_provider is None

@@ -30,6 +30,7 @@ def _result_to_dict(result: ScannerResult) -> dict[str, Any]:
         "premarket_price": result.premarket_price,
         "latest_price": result.latest_price,
         "gap_pct": result.gap_pct,
+        "gap_dollar": result.gap_dollar,
         "volume": result.volume,
         "rel_volume": result.rel_volume,
         "confidence": result.confidence,
@@ -120,7 +121,7 @@ def get_ticker_snapshot(
     if not ticker or not ticker.strip():
         return {"error": "ticker is required."}
 
-    from services.scanner_service import compute_gap_pct, compute_rel_volume
+    from services.scanner_service import compute_gap_dollar, compute_gap_pct, compute_rel_volume
 
     svc = snapshot_service or SnapshotService()
     snap = svc.build_snapshot(ticker)
@@ -131,6 +132,7 @@ def get_ticker_snapshot(
         "premarket_price": snap.premarket_price,
         "latest_price": snap.latest_price,
         "gap_pct": compute_gap_pct(snap.previous_close, price),
+        "gap_dollar": compute_gap_dollar(snap.previous_close, price),
         "market_cap": snap.market_cap,
         "volume": snap.volume,
         "rel_volume": compute_rel_volume(snap.volume, snap.average_volume),

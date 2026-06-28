@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS scanner_results (
     premarket_price REAL,
     latest_price REAL,
     gap_pct REAL,
+    gap_dollar REAL,
     volume REAL,
     confidence TEXT,
     notes TEXT,
@@ -97,8 +98,20 @@ def initialize_database(db_path: str | Path | None = None) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
         conn.executescript(SCHEMA_SQL)
+        _migrate(conn)
         conn.commit()
     return path
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Idempotent column additions for pre-existing local databases.
+
+    CREATE TABLE IF NOT EXISTS will not add columns to an already-existing
+    table, so additive schema changes need an explicit, guarded ALTER.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(scanner_results)")}
+    if "gap_dollar" not in columns:
+        conn.execute("ALTER TABLE scanner_results ADD COLUMN gap_dollar REAL")
 
 
 def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
@@ -260,9 +273,9 @@ def insert_scanner_result(conn: sqlite3.Connection, run_id: str, result: Scanner
         """
         INSERT INTO scanner_results (
             run_id, ticker, name, universe, market_cap, previous_close,
-            premarket_price, latest_price, gap_pct, volume, confidence, notes, created_at
+            premarket_price, latest_price, gap_pct, gap_dollar, volume, confidence, notes, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run_id,
@@ -274,6 +287,7 @@ def insert_scanner_result(conn: sqlite3.Connection, run_id: str, result: Scanner
             result.premarket_price,
             result.latest_price,
             result.gap_pct,
+            result.gap_dollar,
             result.volume,
             result.confidence,
             result.notes,

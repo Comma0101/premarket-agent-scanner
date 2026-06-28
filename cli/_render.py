@@ -36,6 +36,13 @@ def format_gap(value: float | None) -> str:
     return f"{sign}{value:.2f}%"
 
 
+def format_gap_dollar(value: float | None) -> str:
+    if value is None:
+        return "-"
+    sign = "+" if value > 0 else "-" if value < 0 else ""
+    return f"{sign}${abs(value):,.2f}"
+
+
 def format_rvol(value: float | None) -> str:
     return "-" if value is None else f"{value:.1f}x"
 
@@ -54,6 +61,7 @@ def render_scan(output: ScanRunOutput) -> None:
     table.add_column("Ticker", style="bold cyan")
     table.add_column("Name", overflow="ellipsis", max_width=22)
     table.add_column("Gap", justify="right")
+    table.add_column("Gap$", justify="right")
     table.add_column("RVol", justify="right")
     table.add_column("Pre/Last", justify="right")
     table.add_column("Prev Close", justify="right")
@@ -69,10 +77,17 @@ def render_scan(output: ScanRunOutput) -> None:
         gap_style = "green" if (r.gap_pct or 0) > 0 else "red" if (r.gap_pct or 0) < 0 else ""
         price = r.premarket_price if r.premarket_price is not None else r.latest_price
         conf_style = "yellow" if r.confidence in _WARN_CONFIDENCE else "dim"
+        gap_cell = f"[{gap_style}]{format_gap(r.gap_pct)}[/{gap_style}]" if gap_style else format_gap(r.gap_pct)
+        gap_dollar_cell = (
+            f"[{gap_style}]{format_gap_dollar(r.gap_dollar)}[/{gap_style}]"
+            if gap_style
+            else format_gap_dollar(r.gap_dollar)
+        )
         table.add_row(
             r.ticker,
             r.name or "-",
-            f"[{gap_style}]{format_gap(r.gap_pct)}[/{gap_style}]" if gap_style else format_gap(r.gap_pct),
+            gap_cell,
+            gap_dollar_cell,
             format_rvol(r.rel_volume),
             format_price(price),
             format_price(r.previous_close),
@@ -97,7 +112,8 @@ def _render_scan_plain(output: ScanRunOutput) -> None:
     for r in output.results:
         price = r.premarket_price if r.premarket_price is not None else r.latest_price
         print(
-            f"{r.ticker:<6} {format_gap(r.gap_pct):>8}  rvol={format_rvol(r.rel_volume):>6}  "
+            f"{r.ticker:<6} {format_gap(r.gap_pct):>8} {format_gap_dollar(r.gap_dollar):>10}  "
+            f"rvol={format_rvol(r.rel_volume):>6}  "
             f"pre/last={format_price(price):>10}  prev={format_price(r.previous_close):>10}  "
             f"cap={format_market_cap(r.market_cap):>9}  {r.confidence}"
         )

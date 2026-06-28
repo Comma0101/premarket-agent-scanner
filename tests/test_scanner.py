@@ -8,13 +8,19 @@ confidence labelling, filtering, and sorting exactly as production would.
 from __future__ import annotations
 
 from app.models import (
+    AssetProfile,
     ProviderPriceData,
     ScanFilters,
     make_scan_filters,
     resolve_cap_tier,
     utc_now_iso,
 )
-from services.scanner_service import ScannerService, compute_gap_pct, compute_rel_volume
+from services.scanner_service import (
+    ScannerService,
+    compute_gap_dollar,
+    compute_gap_pct,
+    compute_rel_volume,
+)
 from services.snapshot_service import SnapshotService
 from services.universe_service import UniverseService
 
@@ -64,6 +70,14 @@ def test_compute_gap_pct():
     assert compute_gap_pct(0.0, 105.0) is None
 
 
+def test_compute_gap_dollar():
+    assert compute_gap_dollar(100.0, 105.0) == 5.0
+    assert compute_gap_dollar(100.0, 95.0) == -5.0
+    assert compute_gap_dollar(None, 105.0) is None
+    assert compute_gap_dollar(100.0, None) is None
+    assert compute_gap_dollar(1841.18, 1900.0) == 58.82
+
+
 def test_gap_up_filter_and_market_cap():
     quotes = {
         "NVDA": _quote("NVDA", prev=100.0, pre=108.0, cap=3.0e12),  # +8%, mega cap
@@ -79,6 +93,7 @@ def test_gap_up_filter_and_market_cap():
     tickers = [r.ticker for r in out.results]
     assert tickers == ["NVDA"]  # AMD too small a gap, TINY too small a cap
     assert out.results[0].gap_pct == 8.0
+    assert out.results[0].gap_dollar == 8.0
     assert out.results[0].confidence == "OK"
 
 
@@ -170,3 +185,46 @@ def test_min_volume_filter_excludes_thin_names():
     filters = make_scan_filters(min_gap_abs=5.0, min_volume=1_000_000)
     out = _service(quotes).scan(tickers="LIQ,THIN", filters=filters)
     assert [r.ticker for r in out.results] == ["LIQ"]
+
+
+def test_gap_dollar_persisted_to_db(tmp_path):
+    from app.db import get_connection
+
+    db_path = str(tmp_path / "scan.sqlite")
+    quotes = {"NVDA": _quote("NVDA", prev=100.0, pre=108.0, cap=3.0e12)}
+    snapshot_service = SnapshotService(yf_provider=FakePriceProvider(quotes))
+    service = ScannerService(
+        universe_service=UniverseService(),
+        snapshot_service=snapshot_service,
+        profile_service=None,
+        db_path=db_path,
+        persist=True,
+    )
+    out = service.scan(tickers="NVDA", filters=ScanFilters())
+
+    assert out.results[0].gap_dollar == 8.0
+    conn = get_connection(db_path)
+    row = conn.execute(
+        "SELECT gap_pct, gap_dollar FROM scanner_results WHERE run_id = ?", (out.run_id,)
+    ).fetchone()
+    conn.close()
+    assert row["gap_pct"] == 8.0
+    assert row["gap_dollar"] == 8.0
+
+
+def test_profile_service_populates_name():
+    # The snapshot has no name; profile enrichment fills it in.
+    class FakeProfileService:
+        def get_profile(self, ticker: str, *, force_refresh: bool = False):
+            return AssetProfile(
+                ticker=ticker, name="Nvidia Corp", market_cap=3.0e12, source="fake"
+            )
+
+    quotes = {"NVDA": _quote("NVDA", prev=100.0, pre=108.0, cap=3.0e12)}
+    out = ScannerService(
+        universe_service=UniverseService(),
+        snapshot_service=SnapshotService(yf_provider=FakePriceProvider(quotes)),
+        profile_service=FakeProfileService(),
+        persist=False,
+    ).scan(tickers="NVDA", filters=ScanFilters())
+    assert out.results[0].name == "Nvidia Corp"
