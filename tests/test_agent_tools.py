@@ -66,6 +66,49 @@ def test_scan_premarket_tool_validates_selection_and_direction():
     assert "error" in tools.scan_premarket(tickers="NVDA", direction="sideways")
 
 
+def test_scan_small_caps_tool_returns_candidates():
+    from app.models import SmallCapCandidate, SmallCapScanOutput
+
+    class FakeSmallCapService:
+        def scan(self, **kwargs):
+            return SmallCapScanOutput(
+                preset=kwargs["preset_name"],
+                run_ids=["run1"],
+                candidate_count=1,
+                candidates=[
+                    SmallCapCandidate(
+                        ticker="HOT",
+                        name="Hot Stock Inc.",
+                        market_cap=25_000_000,
+                        gap_pct=12.0,
+                        gap_dollar=0.72,
+                        volume=2_000_000,
+                        rel_volume=5.0,
+                        confidence="OK",
+                        score=90,
+                        grade="A_WATCH",
+                        matched_signals=["small_cap_fit"],
+                        missing_fields=["float"],
+                        risk_notes=[],
+                        sources=["fake"],
+                        timestamp="2026-06-28T12:00:00Z",
+                    )
+                ],
+                notes=["note"],
+            )
+
+    out = tools.scan_small_caps(
+        tickers="HOT",
+        preset_name="sykes_small_cap_v0",
+        service=FakeSmallCapService(),
+    )
+
+    assert out["candidate_count"] == 1
+    assert out["candidates"][0]["ticker"] == "HOT"
+    assert out["candidates"][0]["grade"] == "A_WATCH"
+    assert "float" in out["candidates"][0]["missing_fields"]
+
+
 def test_list_universes_tool_shape():
     out = tools.list_universes(service=UniverseService())
     assert "MAG7" in out["universes"]
@@ -87,7 +130,12 @@ def test_dispatch_unknown_tool():
 
 def test_tool_definitions_are_well_formed():
     names = {t["name"] for t in definitions.TOOLS}
-    assert names == {"scan_premarket", "list_universes", "get_ticker_snapshot"}
+    assert names == {
+        "scan_premarket",
+        "scan_small_caps",
+        "list_universes",
+        "get_ticker_snapshot",
+    }
     for tool in definitions.TOOLS:
         assert tool["description"]
         assert tool["input_schema"]["type"] == "object"

@@ -40,6 +40,26 @@ def _result_to_dict(result: ScannerResult) -> dict[str, Any]:
     }
 
 
+def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
+    return {
+        "ticker": candidate.ticker,
+        "name": candidate.name,
+        "market_cap": candidate.market_cap,
+        "gap_pct": candidate.gap_pct,
+        "gap_dollar": candidate.gap_dollar,
+        "volume": candidate.volume,
+        "rel_volume": candidate.rel_volume,
+        "confidence": candidate.confidence,
+        "score": candidate.score,
+        "grade": candidate.grade,
+        "matched_signals": candidate.matched_signals,
+        "missing_fields": candidate.missing_fields,
+        "risk_notes": candidate.risk_notes,
+        "sources": candidate.sources,
+        "timestamp": candidate.timestamp,
+    }
+
+
 def scan_premarket(
     *,
     universe: str | None = None,
@@ -91,6 +111,49 @@ def scan_premarket(
         "status": output.status,
         "result_count": len(output.results),
         "results": [_result_to_dict(r) for r in output.results],
+        "notes": output.notes,
+    }
+
+
+def scan_small_caps(
+    *,
+    preset_name: str = "sykes_small_cap_v0",
+    universe: str | None = None,
+    watchlist: str | None = None,
+    tickers: str | None = None,
+    all_universes: bool = False,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    """Run the small-cap scanner and return JSON-safe candidates."""
+    if not any([universe, watchlist, tickers, all_universes]):
+        return {
+            "error": "Provide at least one of: universe, watchlist, tickers, or all_universes."
+        }
+
+    scanner = service
+    if scanner is None:
+        from services.small_cap_scanner_service import SmallCapScannerService
+
+        scanner = SmallCapScannerService()
+
+    try:
+        output = scanner.scan(
+            preset_name=preset_name,
+            universe=universe,
+            watchlist=watchlist,
+            tickers=tickers,
+            all_universes=all_universes,
+        )
+    except KeyError as exc:
+        return {"error": str(exc)}
+
+    return {
+        "preset": output.preset,
+        "run_ids": output.run_ids,
+        "candidate_count": output.candidate_count,
+        "candidates": [
+            _small_cap_candidate_to_dict(candidate) for candidate in output.candidates
+        ],
         "notes": output.notes,
     }
 
