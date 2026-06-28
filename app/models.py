@@ -109,6 +109,19 @@ class ScanFilters:
     include_low_confidence: bool = True
 
 
+@dataclass
+class SmallCapScannerPreset:
+    name: str
+    cap_tiers: list[str]
+    direction: Direction = "up"
+    min_gap_abs: float = 5.0
+    min_volume: float | None = None
+    min_rel_volume: float | None = 2.0
+    include_low_confidence: bool = False
+    missing_fields: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
 # Market-cap tiers (USD). Upper bound is exclusive; None means no upper bound.
 CAP_TIERS: dict[str, tuple[float, float | None]] = {
     "nano": (0, 50e6),
