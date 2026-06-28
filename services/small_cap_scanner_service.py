@@ -21,6 +21,7 @@ def grade_small_cap_candidate(
     matched: list[str] = []
     risk_notes: list[str] = []
     provided_missing_fields = list(missing_fields)
+    has_absolute_volume_floor = False
 
     if result.confidence in UNUSABLE_CONFIDENCE:
         matched.append("unusable_confidence")
@@ -86,9 +87,11 @@ def grade_small_cap_candidate(
     if result.volume is not None and result.volume >= 1_000_000:
         score += 20
         matched.append("liquid_volume")
+        has_absolute_volume_floor = True
     elif result.volume is not None and result.volume >= 500_000:
         score += 10
         matched.append("minimum_volume")
+        has_absolute_volume_floor = True
     else:
         risk_notes.append("Volume is below the preferred small-cap scanner floor or unknown.")
 
@@ -99,7 +102,11 @@ def grade_small_cap_candidate(
         risk_notes.append(f"Data confidence is {result.confidence}.")
 
     risk_notes.extend(_missing_field_notes(provided_missing_fields))
-    grade = _grade(score, provided_missing_fields)
+    grade = _grade(
+        score,
+        provided_missing_fields,
+        has_absolute_volume_floor=has_absolute_volume_floor,
+    )
     return _candidate(result, score, grade, matched, provided_missing_fields, risk_notes)
 
 
@@ -110,8 +117,13 @@ def _missing_field_notes(missing_fields: list[str]) -> list[str]:
     ]
 
 
-def _grade(score: int, missing_fields: list[str]) -> SmallCapGrade:
-    if score >= 80 and len(missing_fields) <= 6:
+def _grade(
+    score: int,
+    missing_fields: list[str],
+    *,
+    has_absolute_volume_floor: bool,
+) -> SmallCapGrade:
+    if score >= 80 and len(missing_fields) <= 6 and has_absolute_volume_floor:
         return "A_WATCH"
     if score >= 60:
         return "B_WATCH"

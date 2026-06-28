@@ -120,6 +120,21 @@ def test_grade_strong_small_cap_candidate_is_a_watch():
     assert any("unknown" in note.lower() for note in candidate.risk_notes)
 
 
+def test_strong_high_rvol_candidate_with_thin_volume_is_not_a_watch():
+    candidate = grade_small_cap_candidate(
+        _result(volume=1_000, rel_volume=8.0),
+        missing_fields=["float", "catalyst", "filings"],
+    )
+
+    assert candidate.grade in {"B_WATCH", "C_WATCH", "REJECT"}
+    assert candidate.grade != "A_WATCH"
+    assert "strong_gap" in candidate.matched_signals
+    assert "high_rvol" in candidate.matched_signals
+    assert "liquid_volume" not in candidate.matched_signals
+    assert "minimum_volume" not in candidate.matched_signals
+    assert any("volume" in note.lower() for note in candidate.risk_notes)
+
+
 def test_conflict_candidate_is_rejected():
     candidate = grade_small_cap_candidate(
         _result(confidence="CONFLICT"),
