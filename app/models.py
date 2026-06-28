@@ -17,6 +17,7 @@ Confidence = Literal[
 ]
 
 Direction = Literal["up", "down", "both"]
+SmallCapGrade = Literal["A_WATCH", "B_WATCH", "C_WATCH", "REJECT"]
 
 
 def utc_now_iso() -> str:
@@ -191,6 +192,25 @@ class ScannerResult:
     sources: list[str] = field(default_factory=list)
     timestamp: str | None = None
     created_at: str = field(default_factory=utc_now_iso)
+
+
+@dataclass
+class SmallCapCandidate:
+    ticker: str
+    name: str | None
+    market_cap: float | None
+    gap_pct: float | None
+    gap_dollar: float | None
+    volume: float | None
+    rel_volume: float | None
+    confidence: Confidence
+    score: int
+    grade: SmallCapGrade
+    matched_signals: list[str] = field(default_factory=list)
+    missing_fields: list[str] = field(default_factory=list)
+    risk_notes: list[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    timestamp: str | None = None
 
 
 @dataclass
