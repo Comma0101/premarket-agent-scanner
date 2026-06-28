@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from app.models import ScannerResult, ScanRunOutput
 from services.scanner_preset_service import PresetService
@@ -10,6 +11,37 @@ from services.small_cap_scanner_service import (
     SmallCapScannerService,
     grade_small_cap_candidate,
 )
+
+
+def test_scan_small_caps_cli_imports():
+    import cli.scan_small_caps as module
+
+    assert module.app is not None
+
+
+def test_scan_small_caps_cli_reports_invalid_preset_cleanly():
+    import cli.scan_small_caps as module
+
+    result = CliRunner().invoke(
+        module.app,
+        ["--tickers", "HOT", "--preset", "does_not_exist"],
+    )
+
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "does_not_exist" in result.output
+    assert "Unknown scanner preset" in result.output
+
+
+def test_scan_small_caps_cli_reports_unknown_universe_cleanly():
+    import cli.scan_small_caps as module
+
+    result = CliRunner().invoke(module.app, ["--universe", "DOES_NOT_EXIST"])
+
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "DOES_NOT_EXIST" in result.output
+    assert "Unknown universe" in result.output
 
 
 def _result(
