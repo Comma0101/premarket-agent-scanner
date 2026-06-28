@@ -43,12 +43,12 @@ Implemented:
 - Gap scanner service with market-cap, gap, direction, volume, and
   relative-volume (RVOL) filters, plus named cap tiers (nano/micro/small/mid/
   large/mega) for small-cap vs large-cap gapper scans.
-- CLI: `list_universes`, `scan_premarket`, and `ask` (natural-language).
+- CLI: `list_universes`, `scan_premarket`, and `scan_small_caps`.
 - Agent-callable JSON tool layer (`agent_tools`): `scan_premarket`,
-  `list_universes`, and `get_ticker_snapshot`, with Anthropic tool-use schemas,
-  a dispatcher that logs to `agent_queries`, and a Claude agent loop.
+  `scan_small_caps`, `list_universes`, and `get_ticker_snapshot`, with tool-use
+  schemas and a dispatcher that logs to `agent_queries`.
 - Test suite covering gap math, filtering, sorting, confidence labelling, the
-  JSON tools, and the agent tool-use loop (all offline).
+  JSON tools, and dispatcher behavior (all offline).
 - Default AI-related universes and personal watchlist example.
 
 Pending:
@@ -59,18 +59,13 @@ Pending:
 
 ## Agent Layer
 
-Ask the scanner in plain English (requires the Anthropic SDK and an API key):
+The repo exposes JSON-safe tools in `agent_tools` for an external agent
+(Codex, Claude, opencode, or another driver) to call directly. There is no
+built-in LLM loop in this repo.
 
-```bash
-pip install -e ".[agent]"
-export ANTHROPIC_API_KEY=...   # add when ready
-python -m cli.ask "Which MAG7 names are gapping up over 1% premarket?"
-```
-
-The agent never invents numbers — every price, gap, market cap, and confidence
-label comes from the tool layer, which is a thin wrapper over the scanner. The
-JSON tools work and are tested without any API key; only the conversational
-`ask` command needs one.
+Every price, gap, market cap, volume, and confidence label comes from the tool
+layer, which is a thin wrapper over the scanner. The JSON tools work and are
+tested without any LLM API key.
 
 Note: Yahoo Finance must be reachable for the yfinance path. Some sandboxed or
 policy-restricted networks block it; run locally for live premarket data.
@@ -139,6 +134,22 @@ Cap tiers: `nano` (<$50M), `micro` ($50M-$300M), `small` ($300M-$2B),
 relative volume (current volume ÷ average daily volume) — a key gapper-quality
 signal, especially for small caps. Small-cap scanning needs small-cap tickers in
 a universe or watchlist; add them in `data/universes.yaml`.
+
+## Small-Cap Discovery Scanner
+
+`python -m cli.scan_small_caps` runs a listed small-cap discovery scan using
+named presets such as `sykes_small_cap_v0`. The scanner ranks watchlist
+candidates by gap, volume, RVOL, cap fit, and data confidence, while surfacing
+unsupported fields like float, catalyst, filings, former-runner history,
+liquidity, and short-interest context as unknown.
+
+Example:
+
+```bash
+python -m cli.scan_small_caps --all --preset sykes_small_cap_v0
+```
+
+The output is watchlist context only, not buy/sell advice.
 
 List universes:
 
