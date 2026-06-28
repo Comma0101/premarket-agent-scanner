@@ -82,3 +82,13 @@ Sykes-style educational lens. It does not claim endorsement or private access.
 - How should former-runner history be defined operationally: lookback window, prior percent move, prior volume spike, and required catalyst context? (`EV-010`, `EV-011`, `EV-014`)
 - What multi-day features should distinguish an extreme-momentum candidate from an ordinary premarket gapper? (`EV-012`, `EV-013`)
 - Which liquidity gates should be mandatory before a premarket candidate can move beyond watchlist status? (`EV-002`, `EV-021`, `EV-024`)
+
+## Profile Readiness
+
+Status: partial
+
+Rationale:
+
+- The current evidence supports a Sykes-style educational discovery lens for gap, direction, volume, relative volume, market-cap context, watchlist framing, and risk-first language. (`EV-001`, `EV-004`, `EV-005`, `EV-015`, `EV-019`)
+- Core rules that depend on catalyst verification, true float, filings or dilution risk, former-runner history, multi-day pattern state, and premarket liquidity are not fully supported by current scanner fields. (`EV-006`, `EV-008`, `EV-011`, `EV-012`, `EV-021`, `EV-022`, `EV-023`, `EV-024`)
+- The dossier is not ready for an automated trader profile that labels setups as confirmed, tradeable, or Sykes-endorsed; any implementation should preserve unknowns and manual-review framing until the data gaps are addressed. (`EV-009`, `EV-016`, `EV-017`, `EV-019`)
