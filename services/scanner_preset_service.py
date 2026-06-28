@@ -22,17 +22,17 @@ class PresetService:
         if key not in raw:
             valid = ", ".join(sorted(raw)) or "(none)"
             raise KeyError(f"Unknown scanner preset: {name}. Valid presets: {valid}.")
-        data = raw[key] or {}
+        data = self._preset_body(key, raw[key])
         return SmallCapScannerPreset(
             name=key,
-            cap_tiers=[str(item) for item in data.get("cap_tiers", [])],
+            cap_tiers=self._string_list(data, key, "cap_tiers"),
             direction=data.get("direction", "up"),
             min_gap_abs=float(data.get("min_gap_abs", 5.0)),
             min_volume=_optional_float(data.get("min_volume")),
             min_rel_volume=_optional_float(data.get("min_rel_volume", 2.0)),
             include_low_confidence=bool(data.get("include_low_confidence", False)),
-            missing_fields=[str(item) for item in data.get("missing_fields", [])],
-            notes=[str(item) for item in data.get("notes", [])],
+            missing_fields=self._string_list(data, key, "missing_fields"),
+            notes=self._string_list(data, key, "notes"),
         )
 
     def _load(self) -> dict[str, dict[str, Any]]:
@@ -43,6 +43,28 @@ class PresetService:
         if not isinstance(loaded, dict):
             raise ValueError(f"{self.path} must contain a mapping of preset names.")
         return loaded
+
+    def _preset_body(self, name: str, value: Any) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"Preset '{name}' in {self.path} must be a mapping of preset fields."
+            )
+        return value
+
+    def _string_list(
+        self, data: dict[str, Any], preset_name: str, field_name: str
+    ) -> list[str]:
+        if field_name not in data:
+            return []
+        value = data[field_name]
+        if not isinstance(value, list):
+            raise ValueError(
+                f"Preset '{preset_name}' field '{field_name}' in {self.path} "
+                "must be a list."
+            )
+        return [str(item) for item in value]
 
 
 def _optional_float(value: Any) -> float | None:
