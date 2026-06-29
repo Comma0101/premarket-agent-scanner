@@ -239,3 +239,36 @@ def test_run_agent_cli_json_output(monkeypatch):
     assert data["agent_name"] == "sykes_style_small_cap_agent"
     assert data["status"] == "OK"
     assert data["notes"] == ["fake"]
+
+
+def test_run_agent_cli_json_output_suppresses_provider_console_noise(monkeypatch):
+    from cli import run_agent
+
+    class NoisyOrchestrator:
+        def run_sykes_small_cap_watchlist(self, **kwargs):
+            print('HTTP Error 401: {"finance":{"error":{"code":"Unauthorized"}}}')
+            return AgentRunPacket(
+                agent_name="sykes_style_small_cap_agent",
+                strategy="sykes_small_cap_watchlist",
+                status="OK",
+                tool_calls=[],
+                watchlist={
+                    "primary_watch": [],
+                    "secondary_watch": [],
+                    "context_watch": [],
+                },
+                guardrails=["No execution advice."],
+                warnings=[],
+                notes=[],
+                handoff_prompt="Use only the scanner packet.",
+            )
+
+    monkeypatch.setattr(run_agent, "TradingAgentOrchestrator", NoisyOrchestrator)
+
+    result = CliRunner().invoke(run_agent.app, ["--tickers", "HOT", "--json"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "OK"
+    assert result.output.lstrip().startswith("{")
+    assert any("Suppressed provider console output" in note for note in data["notes"])

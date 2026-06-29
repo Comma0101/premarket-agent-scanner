@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 
 import typer
@@ -41,17 +43,18 @@ def main(
             "Pick a selection: --tickers, --universe, --watchlist, --market, or --all."
         )
 
-    packet = TradingAgentOrchestrator().run_sykes_small_cap_watchlist(
-        preset_name=preset_name,
-        tickers=tickers,
-        universe=universe,
-        watchlist=watchlist,
-        market=market,
-        market_limit=market_limit,
-        max_workers=max_workers,
-        all_universes=all_universes,
-        user_query="run sykes-style small-cap watchlist agent",
-    )
+    kwargs = {
+        "preset_name": preset_name,
+        "tickers": tickers,
+        "universe": universe,
+        "watchlist": watchlist,
+        "market": market,
+        "market_limit": market_limit,
+        "max_workers": max_workers,
+        "all_universes": all_universes,
+        "user_query": "run sykes-style small-cap watchlist agent",
+    }
+    packet = _run_agent_packet(json_output=json_output, **kwargs)
 
     if json_output:
         typer.echo(json.dumps(packet.to_dict(), indent=2))
@@ -60,6 +63,31 @@ def main(
 
     if packet.status == "ERROR":
         raise typer.Exit(1)
+
+
+def _run_agent_packet(*, json_output: bool, **kwargs) -> AgentRunPacket:
+    orchestrator = TradingAgentOrchestrator()
+    if not json_output:
+        return orchestrator.run_sykes_small_cap_watchlist(**kwargs)
+
+    captured_stdout = io.StringIO()
+    captured_stderr = io.StringIO()
+    with contextlib.redirect_stdout(captured_stdout), contextlib.redirect_stderr(captured_stderr):
+        packet = orchestrator.run_sykes_small_cap_watchlist(**kwargs)
+
+    note = _provider_console_output_note(captured_stdout.getvalue(), captured_stderr.getvalue())
+    if note:
+        packet.notes.append(note)
+    return packet
+
+
+def _provider_console_output_note(stdout: str, stderr: str) -> str | None:
+    clean = " ".join(f"{stdout}\n{stderr}".split())
+    if not clean:
+        return None
+    if len(clean) > 500:
+        clean = f"{clean[:497]}..."
+    return f"Suppressed provider console output during JSON run: {clean}"
 
 
 def _render_plain(packet: AgentRunPacket) -> None:
