@@ -247,6 +247,17 @@ Smoke-test mode:
 python -m cli.scan_small_caps --market us-listed --market-limit 25
 ```
 
+Bounded worker mode for broader live scans:
+
+```bash
+python -m cli.scan_small_caps --market us-listed --max-workers 8
+python -m cli.run_agent --market us-listed --max-workers 8 --json
+```
+
+`--max-workers` parallelizes snapshot collection at the scanner-service layer.
+It does not change price selection, `gap_basis`, confidence labels, evidence
+enrichment, or the A-grade safety gates.
+
 `--market us-listed` uses Alpaca's active US equity assets when Alpaca keys are
 configured. Without Alpaca keys, it falls back to public Nasdaq Trader symbol
 files and filters out ETFs, test issues, warrants, units, rights, preferreds,

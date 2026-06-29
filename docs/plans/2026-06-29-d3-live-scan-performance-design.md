@@ -36,9 +36,8 @@ Add bounded concurrency at the scanner-service layer.
 - `cli.run_agent --max-workers`
 - Orchestrator packets include `max_workers` in the tool input when provided.
 
-The default CLI/orchestrator behavior should choose a modest live default for
-market scans, while explicit ticker/watchlist scans can remain serial unless
-the user opts in.
+CLI and orchestrator callers stay serial unless the user opts in with a bounded
+worker count. For live broad-market scans, use a modest value such as `8`.
 
 ## Rejected Approaches
 
