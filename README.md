@@ -139,9 +139,14 @@ a universe or watchlist; add them in `data/universes.yaml`.
 
 `python -m cli.scan_small_caps` runs a listed small-cap discovery scan using
 named presets such as `sykes_small_cap_v0`. The scanner ranks watchlist
-candidates by gap, volume, RVOL, cap fit, and data confidence, while surfacing
-unsupported fields like float, catalyst, filings, former-runner history,
-liquidity, and short-interest context as unknown.
+candidates by gap, volume, RVOL, cap fit, and data confidence, while enriching
+the output with evidence when available.
+
+Evidence currently includes float and shares outstanding from profile
+providers, exchange/listing context, recent SEC filing metadata, cached
+catalyst/news records, and local former-runner history. Missing evidence is
+still shown as unknown rather than inferred. Short-interest and borrow-cost
+context remain unsupported in v1.
 
 Example:
 
