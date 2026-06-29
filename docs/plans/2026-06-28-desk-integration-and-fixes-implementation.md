@@ -70,8 +70,10 @@ git commit -m "Add MCP server spine, gap_basis provenance, and desk persona"
 **Step 3 — commit the shared agent contract separately**
 
 ```bash
-git add AGENTS.md docs/plans/2026-06-28-desk-integration-and-fixes-implementation.md
-git commit -m "Add AGENTS.md shared agent contract and integration plan"
+git add AGENTS.md \
+        docs/plans/2026-06-28-desk-integration-and-fixes-implementation.md \
+        docs/plans/2026-06-28-sykes-data-layer-roadmap.md
+git commit -m "Add AGENTS.md shared agent contract, integration plan, and data-layer roadmap"
 ```
 
 **Verify**
