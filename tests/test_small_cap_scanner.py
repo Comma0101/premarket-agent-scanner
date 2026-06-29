@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from app.models import ScannerResult, ScanRunOutput
+from app.models import ScannerResult, ScanRunOutput, SmallCapEvidence
 from services.scanner_preset_service import PresetService
 from services.small_cap_scanner_service import (
     SmallCapScannerService,
@@ -141,6 +141,38 @@ def test_string_list_fields_must_be_lists(tmp_path: Path, field: str):
         service.get_preset("bad")
 
 
+def test_small_cap_scanner_attaches_evidence_to_candidates():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[_result(ticker="HOT")],
+                notes=[],
+            )
+
+    class FakeEvidenceService:
+        def enrich_candidates(self, candidates):
+            candidates[0].evidence = SmallCapEvidence(
+                ticker="HOT",
+                float_shares=8_000_000,
+                missing_fields=["catalyst", "filings"],
+            )
+            return candidates
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=FakeEvidenceService(),
+    ).scan(tickers="HOT", preset_name="sykes_small_cap_v0")
+
+    candidate = output.candidates[0]
+    assert candidate.evidence is not None
+    assert candidate.evidence.float_shares == 8_000_000
+
+
 def test_grade_strong_small_cap_candidate_is_a_watch():
     candidate = grade_small_cap_candidate(
         _result(),
@@ -229,7 +261,14 @@ def test_small_cap_scanner_runs_each_cap_tier_and_ranks_candidates():
 
     fake = FakeScanner()
 
-    output = SmallCapScannerService(scanner_service=fake).scan(
+    class NoopEvidenceService:
+        def enrich_candidates(self, candidates):
+            return candidates
+
+    output = SmallCapScannerService(
+        scanner_service=fake,
+        evidence_service=NoopEvidenceService(),
+    ).scan(
         tickers="HOT,OKAY",
         preset_name="sykes_small_cap_v0",
     )

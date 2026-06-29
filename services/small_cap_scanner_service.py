@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Protocol
+
 from app.models import (
     ScannerResult,
     SmallCapCandidate,
@@ -9,6 +11,7 @@ from app.models import (
 )
 from services.scanner_preset_service import PresetService
 from services.scanner_service import ScannerService
+from services.small_cap_evidence_service import SmallCapEvidenceService
 
 
 UNUSABLE_CONFIDENCE = {
@@ -20,14 +23,28 @@ UNUSABLE_CONFIDENCE = {
 }
 
 
+class SmallCapEvidenceEnricher(Protocol):
+    def enrich_candidates(
+        self,
+        candidates: list[SmallCapCandidate],
+    ) -> list[SmallCapCandidate]:
+        ...
+
+
 class SmallCapScannerService:
     def __init__(
         self,
         scanner_service: ScannerService | None = None,
         preset_service: PresetService | None = None,
+        evidence_service: SmallCapEvidenceEnricher | None = None,
     ) -> None:
         self.scanner_service = scanner_service or ScannerService()
         self.preset_service = preset_service or PresetService()
+        self.evidence_service = (
+            evidence_service
+            if evidence_service is not None
+            else SmallCapEvidenceService()
+        )
 
     def scan(
         self,
@@ -79,6 +96,8 @@ class SmallCapScannerService:
             key=lambda candidate: candidate.score,
             reverse=True,
         )
+        if candidates:
+            candidates = self.evidence_service.enrich_candidates(candidates)
         return SmallCapScanOutput(
             preset=preset.name,
             run_ids=run_ids,
