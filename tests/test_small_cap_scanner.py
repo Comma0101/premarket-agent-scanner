@@ -127,6 +127,30 @@ def test_scan_small_caps_cli_reports_unknown_universe_cleanly():
     assert "Unknown universe" in result.output
 
 
+def test_scan_small_caps_cli_reports_market_source_failure_cleanly(monkeypatch):
+    import cli.scan_small_caps as module
+    import providers.market_universe_provider as market_module
+
+    def raise_network_error():
+        raise RuntimeError("nasdaq trader offline")
+
+    monkeypatch.setattr(
+        market_module,
+        "fetch_nasdaq_trader_symbol_files",
+        raise_network_error,
+    )
+
+    result = CliRunner().invoke(
+        module.app,
+        ["--market", "us-listed", "--market-limit", "1"],
+    )
+
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "Market universe us-listed unavailable" in result.output
+    assert "nasdaq trader offline" in result.output
+
+
 def _result(
     *,
     ticker="HOT",

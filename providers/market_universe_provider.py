@@ -141,7 +141,10 @@ class MarketUniverseProvider:
         else:
             notes.append("Alpaca assets not configured; used Nasdaq Trader symbol files.")
 
-        nasdaq_listed, other_listed = self.nasdaq_fetcher()
+        try:
+            nasdaq_listed, other_listed = self.nasdaq_fetcher()
+        except Exception as exc:
+            raise ValueError(f"Market universe {normalized} unavailable: {exc}") from exc
         symbols = parse_nasdaq_trader_symbols(nasdaq_listed, other_listed)
         notes.extend(_filter_notes(_count_symbol_rows(nasdaq_listed, other_listed), len(symbols)))
         return MarketUniverse(
