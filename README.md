@@ -19,7 +19,7 @@ The scanner is a data/query layer first. It is not an auto-trading system and do
 - Market-cap and company-profile caching.
 - Premarket gap calculation.
 - Data-confidence labels for missing, stale, low-confidence, and conflicting data.
-- CLI and agent-callable JSON tool layer.
+- CLI, agent-callable JSON tool layer, and deterministic agent orchestrator.
 
 ## Current Status
 
@@ -47,6 +47,9 @@ Implemented:
 - Agent-callable JSON tool layer (`agent_tools`): `scan_premarket`,
   `scan_small_caps`, `list_universes`, and `get_ticker_snapshot`, with tool-use
   schemas and a dispatcher that logs to `agent_queries`.
+- Agent orchestrator (`agent_orchestrator`) that turns scanner output into a
+  grounded Sykes-style small-cap watchlist packet for Codex, Claude, opencode,
+  or another external driver.
 - Test suite covering gap math, filtering, sorting, confidence labelling, the
   JSON tools, and dispatcher behavior (all offline).
 - Default AI-related universes and personal watchlist example.
@@ -60,12 +63,27 @@ Pending:
 ## Agent Layer
 
 The repo exposes JSON-safe tools in `agent_tools` for an external agent
-(Codex, Claude, opencode, or another driver) to call directly. There is no
-built-in LLM loop in this repo.
+(Codex, Claude, opencode, or another driver) to call directly. It also includes
+a deterministic orchestrator in `agent_orchestrator` that calls those tools and
+builds an agent handoff packet. The packet contains the tool call, watchlist
+buckets, evidence summaries, missing-data warnings, safety guardrails, and a
+handoff prompt. There is still no built-in LLM API client; the external agent
+uses the packet.
 
 Every price, gap, market cap, volume, and confidence label comes from the tool
 layer, which is a thin wrapper over the scanner. The JSON tools work and are
 tested without any LLM API key.
+
+Run the Sykes-style small-cap watchlist orchestrator:
+
+```bash
+python -m cli.run_agent --tickers IONQ,SOUN --json
+```
+
+The default workflow is `sykes_small_cap_watchlist`. It does not impersonate
+Timothy Sykes, does not place orders, and does not produce buy/sell advice. It
+packages scanner evidence so the driving agent can communicate grounded
+watchlist context.
 
 Note: Yahoo Finance must be reachable for the yfinance path. Some sandboxed or
 policy-restricted networks block it; run locally for live premarket data.

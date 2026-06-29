@@ -32,7 +32,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["app", "cli", "services", "providers", "agent_tools"]
+packages = ["app", "cli", "services", "providers", "agent_tools", "agent_orchestrator"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
