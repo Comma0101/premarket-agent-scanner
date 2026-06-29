@@ -8,6 +8,7 @@ from app.models import (
     SmallCapGrade,
     SmallCapScanOutput,
     make_scan_filters,
+    resolve_cap_tier,
 )
 from services.scanner_preset_service import PresetService
 from services.scanner_service import ScannerService
@@ -82,36 +83,37 @@ class SmallCapScannerService:
             if market_limit is not None:
                 notes.insert(1, f"Limited market universe to {len(tickers)} symbol(s) for testing.")
 
-        for cap_tier in preset.cap_tiers:
-            filters = make_scan_filters(
-                cap_tier=cap_tier,
-                min_gap_abs=preset.min_gap_abs,
-                direction=preset.direction,
-                min_volume=preset.min_volume,
-                min_rel_volume=preset.min_rel_volume,
-                include_low_confidence=preset.include_low_confidence,
-            )
-            scan_run = self.scanner_service.scan(
-                universe=universe,
-                watchlist=watchlist,
-                tickers=tickers,
-                all_universes=all_universes,
-                filters=filters,
-            )
-            run_ids.append(scan_run.run_id)
-            notes.extend(scan_run.notes)
+        min_market_cap, max_market_cap = _union_cap_bounds(preset.cap_tiers)
+        filters = make_scan_filters(
+            min_market_cap=min_market_cap,
+            max_market_cap=max_market_cap,
+            min_gap_abs=preset.min_gap_abs,
+            direction=preset.direction,
+            min_volume=preset.min_volume,
+            min_rel_volume=preset.min_rel_volume,
+            include_low_confidence=preset.include_low_confidence,
+        )
+        scan_run = self.scanner_service.scan(
+            universe=universe,
+            watchlist=watchlist,
+            tickers=tickers,
+            all_universes=all_universes,
+            filters=filters,
+        )
+        run_ids.append(scan_run.run_id)
+        notes.extend(scan_run.notes)
 
-            for result in scan_run.results:
-                candidate = grade_small_cap_candidate(
-                    result,
-                    missing_fields=list(preset.missing_fields),
-                )
-                if candidate.grade == "REJECT":
-                    continue
+        for result in scan_run.results:
+            candidate = grade_small_cap_candidate(
+                result,
+                missing_fields=list(preset.missing_fields),
+            )
+            if candidate.grade == "REJECT":
+                continue
 
-                existing = candidates_by_ticker.get(candidate.ticker)
-                if existing is None or candidate.score > existing.score:
-                    candidates_by_ticker[candidate.ticker] = candidate
+            existing = candidates_by_ticker.get(candidate.ticker)
+            if existing is None or candidate.score > existing.score:
+                candidates_by_ticker[candidate.ticker] = candidate
 
         candidates = sorted(
             candidates_by_ticker.values(),
@@ -135,6 +137,18 @@ class SmallCapScannerService:
 
         self.market_universe_provider = MarketUniverseProvider()
         return self.market_universe_provider
+
+
+def _union_cap_bounds(cap_tiers: list[str]) -> tuple[float, float | None]:
+    lows: list[float] = []
+    highs: list[float] = []
+    for tier in cap_tiers:
+        low, high = resolve_cap_tier(tier)
+        lows.append(low or 0.0)
+        highs.append(float("inf") if high is None else high)
+
+    upper = max(highs)
+    return min(lows), (None if upper == float("inf") else upper)
 
 
 def grade_small_cap_candidate(

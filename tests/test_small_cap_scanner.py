@@ -319,51 +319,43 @@ def test_conflict_candidate_is_rejected():
     assert "unusable_confidence" in candidate.matched_signals
 
 
-def test_small_cap_scanner_runs_each_cap_tier_and_ranks_candidates():
+def test_small_cap_scanner_unions_cap_tiers_and_ranks_candidates():
     class FakeScanner:
         def __init__(self):
             self.calls = []
 
         def scan(self, **kwargs):
             self.calls.append(kwargs)
-            run_number = len(self.calls)
-            results_by_run = {
-                1: [
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[
                     _result(
                         ticker="HOT",
                         market_cap=25_000_000,
                         gap_pct=12.0,
                         volume=2_000_000,
                         rel_volume=5.0,
-                    )
-                ],
-                2: [
+                    ),
                     _result(
                         ticker="OKAY",
                         market_cap=125_000_000,
                         gap_pct=6.0,
                         volume=600_000,
                         rel_volume=2.1,
-                    )
-                ],
-                3: [
+                    ),
                     _result(
                         ticker="HOT",
                         market_cap=500_000_000,
                         gap_pct=5.5,
                         volume=550_000,
                         rel_volume=2.0,
-                    )
+                    ),
                 ],
-            }
-            return ScanRunOutput(
-                run_id=f"run-{run_number}",
-                universe="fake",
-                started_at="2026-06-28T12:00:00Z",
-                completed_at="2026-06-28T12:01:00Z",
-                status="OK",
-                results=results_by_run[run_number],
-                notes=[f"raw-note-{run_number}"],
+                notes=["raw-note-1"],
             )
 
     fake = FakeScanner()
@@ -380,22 +372,13 @@ def test_small_cap_scanner_runs_each_cap_tier_and_ranks_candidates():
         preset_name="sykes_small_cap_v0",
     )
 
-    assert len(fake.calls) == 3
-    assert [
-        (
-            call["filters"].min_market_cap,
-            call["filters"].max_market_cap,
-        )
-        for call in fake.calls
-    ] == [
-        (0, 50_000_000),
-        (50_000_000, 300_000_000),
-        (300_000_000, 2_000_000_000),
-    ]
-    assert [call["tickers"] for call in fake.calls] == ["HOT,OKAY"] * 3
+    assert len(fake.calls) == 1
+    assert fake.calls[0]["filters"].min_market_cap == 0
+    assert fake.calls[0]["filters"].max_market_cap == 2_000_000_000
+    assert fake.calls[0]["tickers"] == "HOT,OKAY"
 
     assert output.preset == "sykes_small_cap_v0"
     assert output.candidate_count == 2
-    assert output.run_ids == ["run-1", "run-2", "run-3"]
+    assert output.run_ids == ["run-1"]
     assert [candidate.ticker for candidate in output.candidates] == ["HOT", "OKAY"]
     assert output.candidates[0].score > output.candidates[1].score
