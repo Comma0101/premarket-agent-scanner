@@ -99,6 +99,10 @@ Rules of the layering:
   fake providers, never hit the network in a test.
 - **Lint:** `.venv/bin/ruff check .`
 - **MCP server:** `.venv/bin/python -m mcp_server` (config in `.mcp.json`).
+- **Codex repo config:** `.codex/config.toml` registers the same MCP server for
+  trusted Codex sessions. Repo skills live under `.agents/skills/`.
+- **Full local verification:** `scripts/verify.sh` runs pytest, Ruff, and
+  `git diff --check`.
 - **Parallel work runs on branches/worktrees**, not on `main`. Branch naming in use:
   `feature/<thing>`, `research/<thing>`. Keep one concern per branch; rebase onto the
   current `main` before integrating so shared files (`tools.py`, `models.py`,
