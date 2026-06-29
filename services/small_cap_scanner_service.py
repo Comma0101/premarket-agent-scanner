@@ -122,6 +122,13 @@ class SmallCapScannerService:
         )
         if candidates:
             candidates = self.evidence_service.enrich_candidates(candidates)
+            for candidate in candidates:
+                _apply_float_signals(candidate)
+            candidates = sorted(
+                candidates,
+                key=lambda candidate: candidate.score,
+                reverse=True,
+            )
         return SmallCapScanOutput(
             preset=preset.name,
             run_ids=run_ids,
@@ -287,6 +294,46 @@ def _grade(
     if score >= 35:
         return "C_WATCH"
     return "REJECT"
+
+
+def _apply_float_signals(candidate: SmallCapCandidate) -> None:
+    evidence = candidate.evidence
+    if evidence is None:
+        return
+
+    # These are pragmatic scanner weights, not a claim of an exact trader formula.
+    if evidence.is_low_float is True:
+        _add_signal_score(candidate, "low_float_fit", 10)
+
+    rotation = evidence.float_rotation
+    if rotation is not None:
+        if rotation >= 1.0:
+            _add_signal_score(candidate, "full_float_rotation", 15)
+        elif rotation >= 0.5:
+            _add_signal_score(candidate, "high_float_rotation", 8)
+
+    candidate.missing_fields = list(evidence.missing_fields)
+    candidate.grade = _grade(
+        candidate.score,
+        candidate.missing_fields,
+        has_absolute_volume_floor=_has_absolute_volume_floor(candidate),
+        gap_basis=candidate.gap_basis,
+    )
+
+
+def _add_signal_score(
+    candidate: SmallCapCandidate,
+    signal: str,
+    points: int,
+) -> None:
+    if signal in candidate.matched_signals:
+        return
+    candidate.matched_signals.append(signal)
+    candidate.score += points
+
+
+def _has_absolute_volume_floor(candidate: SmallCapCandidate) -> bool:
+    return candidate.volume is not None and candidate.volume >= 500_000
 
 
 def _candidate(

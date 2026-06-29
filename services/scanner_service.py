@@ -70,6 +70,13 @@ def compute_rel_volume(volume: float | None, average_volume: float | None) -> fl
     return round(volume / average_volume, 2)
 
 
+def compute_float_rotation(volume: float | None, float_shares: float | None) -> float | None:
+    """Float rotation = current volume / tradeable float."""
+    if volume is None or float_shares is None or float_shares <= 0:
+        return None
+    return round(volume / float_shares, 4)
+
+
 def gap_basis_for(snapshot: CombinedSnapshot) -> str | None:
     """Describe what the gap's effective price actually is.
 

@@ -76,6 +76,24 @@ class ProfileService:
                 results.append(profile)
         return results
 
+    def resolve_float(self, ticker: str) -> tuple[float | None, str | None]:
+        normalized = ticker.upper()
+        profile = self.get_profile(normalized)
+        if profile is not None and profile.float_shares is not None:
+            return profile.float_shares, profile.source
+
+        try:
+            yfinance_profile = self.yfinance_provider.get_profile(normalized)
+        except Exception:
+            return None, None
+        if yfinance_profile is None or yfinance_profile.float_shares is None:
+            return None, None
+        return yfinance_profile.float_shares, (
+            yfinance_profile.source
+            or getattr(self.yfinance_provider, "source_name", None)
+            or "yfinance"
+        )
+
     def _fetch_fresh(self, ticker: str) -> AssetProfile | None:
         if self._fmp_available():
             try:

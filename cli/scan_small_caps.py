@@ -106,6 +106,7 @@ def _render_plain(output) -> None:
             f"volume={_format_volume(item.volume):>12} "
             f"market_cap={format_market_cap(item.market_cap):>9} "
             f"float={_format_evidence_float(item.evidence):>9} "
+            f"rotation={_format_float_rotation(item.evidence):>6} "
             f"catalyst={_format_catalyst(item.evidence)} "
             f"filing_risk={_format_filing_risk(item.evidence)} "
             f"former={_format_former_runner(item.evidence)} "
@@ -143,6 +144,9 @@ def _format_evidence_summary(evidence: SmallCapEvidence | None) -> str:
 
     if float_label != "-":
         parts.append(float_label)
+    rotation = _format_float_rotation(evidence)
+    if rotation != "-":
+        parts.append(rotation)
     if has_catalyst:
         parts.append("cat")
     if filing_risk != "-":
@@ -150,7 +154,7 @@ def _format_evidence_summary(evidence: SmallCapEvidence | None) -> str:
     if former_runner != "-":
         parts.append("prev")
 
-    return _compact("; ".join(parts), 32) if parts else "-"
+    return _compact(" ".join(parts), 32) if parts else "-"
 
 
 def _format_evidence_float(evidence: SmallCapEvidence | None) -> str:
@@ -161,6 +165,12 @@ def _format_evidence_float(evidence: SmallCapEvidence | None) -> str:
     if evidence.is_low_float:
         return f"{label} low"
     return label
+
+
+def _format_float_rotation(evidence: SmallCapEvidence | None) -> str:
+    if evidence is None or evidence.float_rotation is None:
+        return "-"
+    return f"{evidence.float_rotation:.1f}x"
 
 
 def _format_catalyst(evidence: SmallCapEvidence | None) -> str:

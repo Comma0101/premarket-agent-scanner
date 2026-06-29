@@ -38,6 +38,7 @@ def _candidate(
             "float_source": "fake-profile",
             "exchange": "NASDAQ",
             "is_low_float": True,
+            "float_rotation": 2.0,
             "filings": [
                 {
                     "ticker": ticker,
@@ -125,7 +126,7 @@ def test_orchestrator_calls_small_cap_tool_and_buckets_candidates():
     hot = as_dict["watchlist"]["primary_watch"][0]
     assert hot["gap_basis"] == "premarket"
     assert hot["evidence_summary"] == (
-        "gap_basis=premarket; float=8.0M low; catalyst=PR: Announces contract; "
+        "gap_basis=premarket; float=8.0M low rot=2.0x; catalyst=PR: Announces contract; "
         "filing_risk=offering; former_runner=yes"
     )
     assert "Use only the scanner packet" in as_dict["handoff_prompt"]

@@ -6,6 +6,7 @@ from app.db import get_cached_filings, get_cached_news, get_runner_history
 from app.models import AssetProfile, FilingEvent, SmallCapCandidate, SmallCapEvidence
 from providers.sec_provider import SECProvider
 from services.profile_service import ProfileService
+from services.scanner_service import compute_float_rotation
 
 
 class SmallCapEvidenceService:
@@ -53,6 +54,14 @@ class SmallCapEvidenceService:
             if profile.source:
                 _append_unique(evidence.sources, profile.source)
 
+        if evidence.float_shares is None:
+            float_shares, float_source = self._resolve_float(candidate.ticker)
+            if float_shares is not None:
+                evidence.float_shares = float_shares
+                evidence.float_source = float_source
+                if float_source:
+                    _append_unique(evidence.sources, float_source)
+
         if filings:
             evidence.filings = filings
             evidence.missing_fields = [
@@ -96,6 +105,15 @@ class SmallCapEvidenceService:
             return evidence
 
         evidence.is_low_float = evidence.float_shares <= self.low_float_threshold
+        evidence.float_rotation = compute_float_rotation(
+            candidate.volume,
+            evidence.float_shares,
+        )
+        if evidence.float_rotation is None:
+            _append_unique(
+                evidence.risk_notes,
+                "float rotation unknown (volume or float missing).",
+            )
         evidence.missing_fields = [
             field for field in evidence.missing_fields if field != "float"
         ]
@@ -133,6 +151,21 @@ class SmallCapEvidenceService:
         except Exception as exc:
             self._profile_error_by_ticker[normalized] = str(exc)
             return None
+
+    def _resolve_float(self, ticker: str) -> tuple[float | None, str | None]:
+        normalized = ticker.upper()
+        resolve_float = getattr(self.profile_service, "resolve_float", None)
+        if not callable(resolve_float):
+            return None, None
+        try:
+            result = resolve_float(ticker)
+        except Exception as exc:
+            self._profile_error_by_ticker[normalized] = str(exc)
+            return None, None
+        if not isinstance(result, tuple) or len(result) != 2:
+            return None, None
+        float_shares, source = result
+        return float_shares, source
 
     def _get_recent_filings(self, ticker: str) -> list[FilingEvent]:
         normalized = ticker.upper()
