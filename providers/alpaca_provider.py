@@ -158,11 +158,12 @@ class AlpacaProvider:
             )
 
         now = datetime.now(timezone.utc)
-        if start is None:
-            start_dt = now - timedelta(hours=4)
-            start = start_dt.isoformat()
-        if end is None:
-            end = now.isoformat()
+        default_start, default_end = _default_bar_window(timeframe, limit, now)
+        if not start:
+            start = default_start.isoformat()
+        if not end:
+            end = default_end.isoformat()
+        sort = _bar_sort(timeframe)
 
         payload = self._request(
             f"/stocks/{ticker.upper()}/bars",
@@ -173,11 +174,16 @@ class AlpacaProvider:
                 "limit": limit,
                 "adjustment": "raw",
                 "feed": "iex",
-                "sort": "asc",
+                "sort": sort,
             },
         )
 
-        raw_bars = payload.get("bars", []) if isinstance(payload, dict) else []
+        raw_bars = payload.get("bars") if isinstance(payload, dict) else []
+        if not isinstance(raw_bars, list):
+            raw_bars = []
+        if sort == "desc":
+            raw_bars = list(reversed(raw_bars))
+
         bars = []
         for bar in raw_bars:
             if not isinstance(bar, dict):
@@ -244,3 +250,23 @@ def _normalize_timestamp(value: Any) -> str | None:
     if parsed is None:
         return None
     return parsed.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _default_bar_window(
+    timeframe: str,
+    limit: int,
+    now: datetime,
+) -> tuple[datetime, datetime]:
+    if _is_daily_timeframe(timeframe):
+        return now - timedelta(days=max(30, limit * 2)), now
+    return now - timedelta(hours=4), now
+
+
+def _bar_sort(timeframe: str) -> str:
+    if _is_daily_timeframe(timeframe):
+        return "desc"
+    return "asc"
+
+
+def _is_daily_timeframe(timeframe: str) -> bool:
+    return timeframe.strip().lower() in {"1day", "1d", "day"}

@@ -136,8 +136,10 @@ class TraderContextService:
             return None
         try:
             series = self.bar_provider.get_bars(ticker, timeframe="1Day", limit=120)
+            from services.daily_bar_service import DailyBarService
             from services.support_resistance_service import SupportResistanceService
 
+            daily_service = DailyBarService()
             pivots = SupportResistanceService().detect_daily_pivots(series)
             return {
                 "source": series.source,
@@ -155,6 +157,9 @@ class TraderContextService:
                     }
                     for pivot in pivots
                 ],
+                "prior_day": daily_service.prior_day_levels(series),
+                "consecutive_green_days": daily_service.consecutive_green_days(series),
+                "run_up_pct": daily_service.multi_day_run_percent(series, days=15),
                 "confidence": "OK" if series.bars else "LOW_CONFIDENCE",
                 "missing_fields": [] if series.bars else ["daily_bars"],
             }

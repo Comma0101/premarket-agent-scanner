@@ -98,11 +98,11 @@ class FakeBarProvider:
     ):
         assert ticker == "HOT"
         if timeframe == "1Day":
-            closes = [9, 10, 11, 15, 11, 10, 9]
+            closes = [9, 10, 11, 15, 11, 12, 13]
             bars = [
                 IntradayBar(
                     ticker="HOT",
-                    timestamp=f"day-{index}",
+                    timestamp=f"2026-06-{20 + index:02d}T20:00:00Z",
                     open=close,
                     high=close + (5 if index == 3 else 1),
                     low=close - (10 if index == 3 else 1),
@@ -180,6 +180,9 @@ def test_trader_context_can_include_technical_packet():
         "support",
         "resistance",
     }
+    assert daily["prior_day"]["close"] == 13
+    assert daily["consecutive_green_days"] == 2
+    assert round(daily["run_up_pct"], 2) == 44.44
 
 
 def test_trader_context_surfaces_missing_optional_technicals_without_inference():
