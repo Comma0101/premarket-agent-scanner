@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Callable
 
 from app.models import FilingEvent
 
@@ -16,44 +16,63 @@ class SECProvider:
     company_tickers_url = "https://www.sec.gov/files/company_tickers.json"
     submissions_url_template = "https://data.sec.gov/submissions/CIK{cik}.json"
 
-    def __init__(self, user_agent: str | None = None, timeout: int = 15) -> None:
+    def __init__(
+        self,
+        user_agent: str | None = None,
+        timeout: int = 15,
+        json_fetcher: Callable[[str], dict[str, Any]] | None = None,
+    ) -> None:
         self.user_agent = (
             user_agent
             or os.getenv("SEC_USER_AGENT")
             or DEFAULT_USER_AGENT
         )
         self.timeout = timeout
-        self._cik_by_ticker: dict[str, str] = {}
+        self._json_fetcher = json_fetcher or self._request_json
+        self._cik_map: dict[str, str] | None = None
 
     def get_recent_filings(self, ticker: str, limit: int = 10) -> list[FilingEvent]:
         normalized = ticker.upper().strip()
         if not normalized or limit <= 0:
             return []
 
+        self._require_real_user_agent()
         cik = self._resolve_cik(normalized)
         if cik is None:
             return []
-        payload = self._request_json(self.submissions_url_template.format(cik=cik))
+        payload = self._json_fetcher(self.submissions_url_template.format(cik=cik))
         return self._parse_recent_filings(normalized, cik, payload, limit)
 
     def _resolve_cik(self, ticker: str) -> str | None:
-        if ticker in self._cik_by_ticker:
-            return self._cik_by_ticker[ticker]
+        return self._load_cik_map().get(ticker.upper().strip())
 
-        payload = self._request_json(self.company_tickers_url)
+    def _load_cik_map(self) -> dict[str, str]:
+        if self._cik_map is not None:
+            return self._cik_map
+
+        payload = self._json_fetcher(self.company_tickers_url)
         records = payload.values() if isinstance(payload, dict) else []
+        cik_map: dict[str, str] = {}
         for record in records:
             if not isinstance(record, dict):
                 continue
-            if str(record.get("ticker", "")).upper() != ticker:
+            ticker = str(record.get("ticker", "")).upper().strip()
+            if not ticker:
                 continue
             try:
                 cik = f"{int(record['cik_str']):010d}"
             except (KeyError, TypeError, ValueError):
-                return None
-            self._cik_by_ticker[ticker] = cik
-            return cik
-        return None
+                continue
+            cik_map[ticker] = cik
+        self._cik_map = cik_map
+        return cik_map
+
+    def _require_real_user_agent(self) -> None:
+        if _is_placeholder_user_agent(self.user_agent):
+            raise RuntimeError(
+                "SEC_USER_AGENT is required for SEC filings lookup; "
+                "set a contact User-Agent before calling data.sec.gov."
+            )
 
     def _request_json(self, url: str) -> dict[str, Any]:
         import requests
@@ -140,6 +159,15 @@ def _host_for_url(url: str) -> str:
     if url.startswith("https://data.sec.gov/"):
         return "data.sec.gov"
     return "www.sec.gov"
+
+
+def _is_placeholder_user_agent(user_agent: str) -> bool:
+    normalized = user_agent.lower().strip()
+    return (
+        not normalized
+        or normalized == DEFAULT_USER_AGENT.lower()
+        or "contact@example.com" in normalized
+    )
 
 
 def _list(value: Any) -> list[Any]:
