@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS scanner_results (
     latest_price REAL,
     gap_pct REAL,
     gap_dollar REAL,
+    gap_basis TEXT,
     volume REAL,
     confidence TEXT,
     notes TEXT,
@@ -112,6 +113,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(scanner_results)")}
     if "gap_dollar" not in columns:
         conn.execute("ALTER TABLE scanner_results ADD COLUMN gap_dollar REAL")
+    if "gap_basis" not in columns:
+        conn.execute("ALTER TABLE scanner_results ADD COLUMN gap_basis TEXT")
 
 
 def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
@@ -273,9 +276,10 @@ def insert_scanner_result(conn: sqlite3.Connection, run_id: str, result: Scanner
         """
         INSERT INTO scanner_results (
             run_id, ticker, name, universe, market_cap, previous_close,
-            premarket_price, latest_price, gap_pct, gap_dollar, volume, confidence, notes, created_at
+            premarket_price, latest_price, gap_pct, gap_dollar, gap_basis, volume,
+            confidence, notes, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run_id,
@@ -288,6 +292,7 @@ def insert_scanner_result(conn: sqlite3.Connection, run_id: str, result: Scanner
             result.latest_price,
             result.gap_pct,
             result.gap_dollar,
+            result.gap_basis,
             result.volume,
             result.confidence,
             result.notes,

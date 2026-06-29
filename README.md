@@ -43,34 +43,58 @@ Implemented:
 - Gap scanner service with market-cap, gap, direction, volume, and
   relative-volume (RVOL) filters, plus named cap tiers (nano/micro/small/mid/
   large/mega) for small-cap vs large-cap gapper scans.
-- CLI: `list_universes`, `scan_premarket`, and `ask` (natural-language).
+- CLI: `list_universes`, `scan_premarket`, and `refresh_profiles`.
 - Agent-callable JSON tool layer (`agent_tools`): `scan_premarket`,
-  `list_universes`, and `get_ticker_snapshot`, with Anthropic tool-use schemas,
-  a dispatcher that logs to `agent_queries`, and a Claude agent loop.
+  `list_universes`, and `get_ticker_snapshot`, with standard tool-use schemas
+  and a dispatcher that can log to `agent_queries`.
+- MCP server (`mcp_server`) exposing those tools over the Model Context Protocol
+  for Claude Code / opencode / codex, plus a `premarket-desk` analyst persona and
+  pluggable `trader_profiles/`.
 - Test suite covering gap math, filtering, sorting, confidence labelling, the
-  JSON tools, and the agent tool-use loop (all offline).
+  JSON tools, and the MCP transport (all offline).
 - Default AI-related universes and personal watchlist example.
 
 Pending:
 
 - Wire FMP market caps into the scan by default.
-- `refresh_profiles` CLI for proactive profile/market-cap caching.
 - Snapshot history / staleness reporting commands.
+- Paper watchlist + journaling tools for the desk agent (track flagged names
+  through the session).
+- Catalyst/news, float, and intraday-level data tools to deepen setup judgment.
 
-## Agent Layer
+## Agent Layer (MCP)
 
-Ask the scanner in plain English (requires the Anthropic SDK and an API key):
+The scanner exposes its tools over the Model Context Protocol so any MCP-capable
+agent — Claude Code, opencode, codex — can call them. There is no built-in LLM
+loop and no API key is needed to serve the tools; the driving agent supplies the
+model.
 
 ```bash
-pip install -e ".[agent]"
-export ANTHROPIC_API_KEY=...   # add when ready
-python -m cli.ask "Which MAG7 names are gapping up over 1% premarket?"
+uv pip install -e ".[agent]"   # adds the `mcp` dependency
+python -m mcp_server            # stdio MCP server exposing the scanner tools
 ```
 
-The agent never invents numbers — every price, gap, market cap, and confidence
-label comes from the tool layer, which is a thin wrapper over the scanner. The
-JSON tools work and are tested without any API key; only the conversational
-`ask` command needs one.
+`.mcp.json` registers the server for Claude Code automatically (it launches
+`python -m mcp_server` on demand). For opencode/codex, point their MCP config at
+the same command. The tools are:
+
+- `scan_premarket` — gap scan over a universe/watchlist/tickers with filters.
+- `list_universes` — list defined universes and watchlists.
+- `get_ticker_snapshot` — full snapshot + computed gap for one ticker.
+
+The agent never invents numbers — every price, gap, market cap, volume, and
+confidence label comes from this tool layer, a thin wrapper over the scanner.
+The tools are tested offline (`tests/test_agent_tools.py`,
+`tests/test_mcp_server.py`).
+
+### Desk persona and trader profiles
+
+`.claude/agents/premarket-desk.md` is a ready-to-use trading-desk analyst persona
+that drives these tools: it scans, ranks gappers into A/B/C setups, gates on the
+data-confidence labels, and writes a morning brief — never inventing a number.
+Its *style* is pluggable: it loads a trader profile from `trader_profiles/`
+(`default.md` out of the box; copy `TEMPLATE.md` to distill a specific trader's
+playbook into concrete scan filters and a grading rubric).
 
 Note: Yahoo Finance must be reachable for the yfinance path. Some sandboxed or
 policy-restricted networks block it; run locally for live premarket data.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from app.models import (
     AssetProfile,
+    CombinedSnapshot,
     ProviderPriceData,
     ScanFilters,
     make_scan_filters,
@@ -20,6 +21,7 @@ from services.scanner_service import (
     compute_gap_dollar,
     compute_gap_pct,
     compute_rel_volume,
+    gap_basis_for,
 )
 from services.snapshot_service import SnapshotService
 from services.universe_service import UniverseService
@@ -210,6 +212,58 @@ def test_gap_dollar_persisted_to_db(tmp_path):
     conn.close()
     assert row["gap_pct"] == 8.0
     assert row["gap_dollar"] == 8.0
+
+
+def _snap(*, premarket, latest, yf_premarket):
+    """A combined snapshot whose yfinance_data carries (or omits) a genuine
+    premarket print, to exercise gap_basis provenance."""
+    yf = ProviderPriceData(
+        ticker="X", source="yfinance", previous_close=100.0,
+        premarket_price=yf_premarket, latest_price=latest,
+    )
+    return CombinedSnapshot(
+        ticker="X", timestamp=None, previous_close=100.0,
+        premarket_price=premarket, latest_price=latest,
+        open_price=None, high=None, low=None, volume=None,
+        source_primary="yfinance", source_secondary=None, confidence="OK",
+        yfinance_data=yf,
+    )
+
+
+def test_gap_basis_genuine_premarket():
+    # yfinance supplied the premarket print -> genuine premarket gap.
+    snap = _snap(premarket=99.0, latest=101.0, yf_premarket=99.0)
+    assert gap_basis_for(snap) == "premarket"
+
+
+def test_gap_basis_alpaca_backfill_is_last_trade():
+    # premarket_price is present but yfinance had no premarket field, so it was
+    # backfilled from Alpaca's latest trade -> NOT premarket.
+    snap = _snap(premarket=99.0, latest=101.0, yf_premarket=None)
+    assert gap_basis_for(snap) == "last_trade"
+
+
+def test_gap_basis_last_trade_when_no_premarket():
+    snap = _snap(premarket=None, latest=101.0, yf_premarket=None)
+    assert gap_basis_for(snap) == "last_trade"
+
+
+def test_scan_sets_gap_basis_premarket_for_yfinance_quote():
+    quotes = {"NVDA": _quote("NVDA", prev=100.0, pre=108.0, cap=3.0e12)}
+    out = _service(quotes).scan(tickers="NVDA", filters=ScanFilters())
+    assert out.results[0].gap_basis == "premarket"
+
+
+def test_scan_sets_gap_basis_last_trade_without_premarket():
+    quotes = {
+        "X": ProviderPriceData(
+            ticker="X", source="fake", previous_close=100.0, latest_price=105.0,
+            volume=1_000_000, timestamp=utc_now_iso(), raw={"marketCap": 5.0e10},
+        )
+    }
+    out = _service(quotes).scan(tickers="X", filters=ScanFilters())
+    assert out.results[0].gap_basis == "last_trade"
+    assert out.results[0].gap_pct == 5.0
 
 
 def test_profile_service_populates_name():

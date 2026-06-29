@@ -175,6 +175,10 @@ class ScannerResult:
     notes: str | None
     rel_volume: float | None = None
     gap_dollar: float | None = None
+    # What the gap's effective price actually is: "premarket" (genuine premarket
+    # quote), "last_trade" (most recent regular/last trade — off-session this is a
+    # stale prior-session price, so the gap is NOT premarket), or None.
+    gap_basis: str | None = None
     sources: list[str] = field(default_factory=list)
     timestamp: str | None = None
     created_at: str = field(default_factory=utc_now_iso)

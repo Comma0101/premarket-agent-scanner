@@ -70,6 +70,30 @@ def compute_rel_volume(volume: float | None, average_volume: float | None) -> fl
     return round(volume / average_volume, 2)
 
 
+def gap_basis_for(snapshot: CombinedSnapshot) -> str | None:
+    """Describe what the gap's effective price actually is.
+
+    - ``"premarket"``  — a genuine premarket quote (yfinance's ``preMarketPrice``
+      field, which is only populated during a live premarket session). This is
+      the case the scanner is built for: gap = premarket price vs prior close.
+    - ``"last_trade"`` — the most recent regular/last trade. Off-session this is a
+      stale prior-session price, so the gap is a day-over-day move, NOT premarket.
+      Always read this together with the confidence label (STALE_DATA off-hours).
+    - ``None``         — no usable price.
+
+    Alpaca backfills ``premarket_price`` with its latest IEX *trade*, which is not
+    a premarket print, so it is reported as ``last_trade`` rather than premarket.
+    """
+    if snapshot.premarket_price is not None:
+        yf = snapshot.yfinance_data
+        if yf is not None and yf.premarket_price is not None:
+            return "premarket"
+        return "last_trade"
+    if snapshot.latest_price is not None:
+        return "last_trade"
+    return None
+
+
 class ScannerService:
     def __init__(
         self,
@@ -190,6 +214,7 @@ class ScannerService:
         )
         gap_pct = compute_gap_pct(snapshot.previous_close, price)
         gap_dollar = compute_gap_dollar(snapshot.previous_close, price)
+        gap_basis = gap_basis_for(snapshot)
 
         membership = selection.memberships.get(ticker, [])
         confidence = snapshot.confidence
@@ -212,6 +237,7 @@ class ScannerService:
             confidence=confidence,
             notes="; ".join(snapshot.notes) if snapshot.notes else None,
             rel_volume=rel_volume,
+            gap_basis=gap_basis,
             sources=snapshot.sources,
             timestamp=snapshot.timestamp,
         )

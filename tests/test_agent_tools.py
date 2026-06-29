@@ -81,6 +81,23 @@ def test_get_ticker_snapshot_tool():
     assert out["confidence"] == "OK"
 
 
+def test_get_ticker_snapshot_uses_configured_providers(monkeypatch):
+    # Regression: the snapshot tool must build its service the same way the scan
+    # path does (with_configured_providers), so both agree on the number. A bare
+    # SnapshotService() would be yfinance-only and drift from the scan's gap.
+    fake = SnapshotService(yf_provider=FakePriceProvider({"NVDA": _quote("NVDA", 100.0, 104.0, 3.0e12)}))
+    calls = {"n": 0}
+
+    def factory(cls, db_path=None):
+        calls["n"] += 1
+        return fake
+
+    monkeypatch.setattr(SnapshotService, "with_configured_providers", classmethod(factory))
+    out = tools.get_ticker_snapshot(ticker="NVDA")  # no injected service -> default path
+    assert calls["n"] == 1
+    assert out["gap_pct"] == 4.0
+
+
 def test_dispatch_unknown_tool():
     assert "error" in definitions.dispatch("nope", {})
 

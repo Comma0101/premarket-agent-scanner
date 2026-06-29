@@ -21,9 +21,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# No optional deps in V1. The agent layer is a set of JSON tool wrappers called
-# directly by the driving agent (opencode/Claude/Codex); there is no built-in
-# LLM/API client, so no SDK extra is needed.
+# The JSON tool layer (agent_tools) has no SDK dependency and is called directly.
+# The `agent` extra adds the MCP server (mcp_server) that exposes those same
+# tools over the Model Context Protocol to any MCP-capable agent frontend
+# (Claude Code, opencode, codex). Install with: uv pip install -e ".[agent]".
+agent = ["mcp>=1.2.0"]
 
 [dependency-groups]
 dev = [
@@ -32,7 +34,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["app", "cli", "services", "providers", "agent_tools"]
+packages = ["app", "cli", "services", "providers", "agent_tools", "mcp_server"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

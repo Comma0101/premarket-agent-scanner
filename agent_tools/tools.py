@@ -31,6 +31,7 @@ def _result_to_dict(result: ScannerResult) -> dict[str, Any]:
         "latest_price": result.latest_price,
         "gap_pct": result.gap_pct,
         "gap_dollar": result.gap_dollar,
+        "gap_basis": result.gap_basis,
         "volume": result.volume,
         "rel_volume": result.rel_volume,
         "confidence": result.confidence,
@@ -121,9 +122,18 @@ def get_ticker_snapshot(
     if not ticker or not ticker.strip():
         return {"error": "ticker is required."}
 
-    from services.scanner_service import compute_gap_dollar, compute_gap_pct, compute_rel_volume
+    from services.scanner_service import (
+        compute_gap_dollar,
+        compute_gap_pct,
+        compute_rel_volume,
+        gap_basis_for,
+    )
 
-    svc = snapshot_service or SnapshotService()
+    # Use the same provider construction as the scan path so a single-ticker
+    # lookup and a scan agree on the number. A bare SnapshotService() is
+    # yfinance-only and would drop Alpaca's premarket price, yielding a
+    # different gap for the same ticker.
+    svc = snapshot_service or SnapshotService.with_configured_providers()
     snap = svc.build_snapshot(ticker)
     price = snap.premarket_price if snap.premarket_price is not None else snap.latest_price
     return {
@@ -133,6 +143,7 @@ def get_ticker_snapshot(
         "latest_price": snap.latest_price,
         "gap_pct": compute_gap_pct(snap.previous_close, price),
         "gap_dollar": compute_gap_dollar(snap.previous_close, price),
+        "gap_basis": gap_basis_for(snap),
         "market_cap": snap.market_cap,
         "volume": snap.volume,
         "rel_volume": compute_rel_volume(snap.volume, snap.average_volume),
