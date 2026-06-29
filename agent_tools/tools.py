@@ -69,6 +69,8 @@ def _catalyst_event_to_dict(catalyst: CatalystEvent) -> dict[str, Any]:
         "url": catalyst.url,
         "summary": catalyst.summary,
         "confidence": catalyst.confidence,
+        "catalyst_quality": catalyst.catalyst_quality,
+        "recency_minutes": catalyst.recency_minutes,
     }
 
 

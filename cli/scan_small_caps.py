@@ -70,7 +70,7 @@ def _render(output) -> None:
     table.add_column("RVOL", justify="right")
     table.add_column("Volume", justify="right")
     table.add_column("Market Cap", justify="right")
-    table.add_column("Evidence", overflow="ellipsis", no_wrap=True, max_width=32)
+    table.add_column("Evidence", overflow="ellipsis", no_wrap=True, max_width=40)
     table.add_column("Missing", overflow="ellipsis", max_width=24)
 
     for item in output.candidates:
@@ -138,7 +138,7 @@ def _format_evidence_summary(evidence: SmallCapEvidence | None) -> str:
 
     parts: list[str] = []
     float_label = _format_evidence_float(evidence)
-    has_catalyst = bool(evidence.catalysts)
+    catalyst_label = _format_catalyst_signal(evidence)
     filing_risk = _format_filing_risk(evidence)
     former_runner = _format_former_runner(evidence)
 
@@ -147,14 +147,14 @@ def _format_evidence_summary(evidence: SmallCapEvidence | None) -> str:
     rotation = _format_float_rotation(evidence)
     if rotation != "-":
         parts.append(rotation)
-    if has_catalyst:
-        parts.append("cat")
+    if catalyst_label != "-":
+        parts.append(catalyst_label)
     if filing_risk != "-":
         parts.append(filing_risk)
     if former_runner != "-":
         parts.append("prev")
 
-    return _compact(" ".join(parts), 32) if parts else "-"
+    return _compact(" ".join(parts), 40) if parts else "-"
 
 
 def _format_evidence_float(evidence: SmallCapEvidence | None) -> str:
@@ -178,8 +178,33 @@ def _format_catalyst(evidence: SmallCapEvidence | None) -> str:
         return "-"
 
     catalyst = evidence.catalysts[0]
+    prefix = _format_catalyst_context(catalyst.catalyst_quality, catalyst.recency_minutes)
     label = f"{catalyst.source}: {catalyst.headline}" if catalyst.source else catalyst.headline
+    if prefix:
+        label = f"{prefix} {label}"
     return _compact(label, 32)
+
+
+def _format_catalyst_signal(evidence: SmallCapEvidence | None) -> str:
+    if evidence is None or not evidence.catalysts:
+        return "-"
+
+    catalyst = evidence.catalysts[0]
+    context = _format_catalyst_context(catalyst.catalyst_quality, catalyst.recency_minutes)
+    return context or "cat"
+
+
+def _format_catalyst_context(quality: str | None, recency_minutes: float | None) -> str:
+    parts: list[str] = []
+    if quality:
+        parts.append(quality)
+    if recency_minutes is not None:
+        parts.append(_format_recency_minutes(recency_minutes))
+    return " ".join(parts)
+
+
+def _format_recency_minutes(value: float) -> str:
+    return f"{int(round(value))}m"
 
 
 def _format_filing_risk(evidence: SmallCapEvidence | None) -> str:

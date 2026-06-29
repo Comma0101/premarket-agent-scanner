@@ -59,6 +59,8 @@ def _candidate(
                     "url": "https://example.test/news",
                     "summary": "Contract headline",
                     "confidence": "OK",
+                    "catalyst_quality": "hard",
+                    "recency_minutes": 30.0,
                 }
             ],
             "former_runner": {
@@ -126,7 +128,7 @@ def test_orchestrator_calls_small_cap_tool_and_buckets_candidates():
     hot = as_dict["watchlist"]["primary_watch"][0]
     assert hot["gap_basis"] == "premarket"
     assert hot["evidence_summary"] == (
-        "gap_basis=premarket; float=8.0M low rot=2.0x; catalyst=PR: Announces contract; "
+        "gap_basis=premarket; float=8.0M low rot=2.0x; catalyst=hard 30m PR: Announces contract; "
         "filing_risk=offering; former_runner=yes"
     )
     assert "Use only the scanner packet" in as_dict["handoff_prompt"]

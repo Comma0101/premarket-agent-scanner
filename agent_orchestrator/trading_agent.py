@@ -207,10 +207,11 @@ def _evidence_summary(
         first = catalysts[0] if isinstance(catalysts[0], dict) else {}
         headline = str(first.get("headline") or "").strip()
         source = str(first.get("source") or "").strip()
+        catalyst_context = _catalyst_context(first)
         if headline and source:
-            parts.append(f"catalyst={source}: {headline}")
+            parts.append(f"catalyst={catalyst_context}{source}: {headline}")
         elif headline:
-            parts.append(f"catalyst={headline}")
+            parts.append(f"catalyst={catalyst_context}{headline}")
 
     risk_tags = _filing_risk_tags(evidence)
     if risk_tags:
@@ -220,6 +221,21 @@ def _evidence_summary(
         parts.append("former_runner=yes")
 
     return "; ".join(parts) if parts else "evidence=unknown"
+
+
+def _catalyst_context(catalyst: dict[str, Any]) -> str:
+    parts: list[str] = []
+    quality = str(catalyst.get("catalyst_quality") or "").strip()
+    recency_minutes = _optional_float(catalyst.get("recency_minutes"))
+    if quality:
+        parts.append(quality)
+    if recency_minutes is not None:
+        parts.append(_format_recency_minutes(recency_minutes))
+    return f"{' '.join(parts)} " if parts else ""
+
+
+def _format_recency_minutes(value: float) -> str:
+    return f"{int(round(value))}m"
 
 
 def _filing_risk_tags(evidence: dict[str, Any]) -> list[str]:

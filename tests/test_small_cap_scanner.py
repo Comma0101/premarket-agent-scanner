@@ -87,6 +87,8 @@ def test_scan_small_caps_cli_formats_compact_evidence_summary():
                 headline="Deal",
                 published_at="2026-06-28T12:00:00Z",
                 source="PR",
+                catalyst_quality="hard",
+                recency_minutes=30.0,
             )
         ],
         filings=[
@@ -103,10 +105,11 @@ def test_scan_small_caps_cli_formats_compact_evidence_summary():
 
     summary = module._format_evidence_summary(evidence)
 
-    assert len(summary) <= 32
+    assert len(summary) <= 40
     assert "8.0M" in summary
     assert "2.0x" in summary
-    assert "cat" in summary
+    assert "hard" in summary
+    assert "30m" in summary
     assert "offering" in summary
     assert "former" in summary or "prev" in summary
     assert module._format_evidence_summary(SmallCapEvidence(ticker="COLD")) == "-"

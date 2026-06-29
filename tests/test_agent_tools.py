@@ -67,7 +67,7 @@ def test_scan_premarket_tool_validates_selection_and_direction():
 
 
 def test_scan_small_caps_tool_returns_candidates():
-    from app.models import SmallCapCandidate, SmallCapEvidence, SmallCapScanOutput
+    from app.models import CatalystEvent, SmallCapCandidate, SmallCapEvidence, SmallCapScanOutput
 
     class FakeSmallCapService:
         def scan(self, **kwargs):
@@ -89,7 +89,7 @@ def test_scan_small_caps_tool_returns_candidates():
                         score=90,
                         grade="A_WATCH",
                         matched_signals=["small_cap_fit"],
-                        missing_fields=["float"],
+                        missing_fields=["short_interest"],
                         risk_notes=[],
                         sources=["fake"],
                         evidence=SmallCapEvidence(
@@ -97,7 +97,17 @@ def test_scan_small_caps_tool_returns_candidates():
                             float_shares=8_000_000,
                             is_low_float=True,
                             float_rotation=2.0,
-                            missing_fields=["catalyst"],
+                            catalysts=[
+                                CatalystEvent(
+                                    ticker="HOT",
+                                    headline="Announces FDA clearance",
+                                    published_at="2026-06-28T12:00:00Z",
+                                    source="PR",
+                                    catalyst_quality="hard",
+                                    recency_minutes=30.0,
+                                )
+                            ],
+                            missing_fields=["short_interest"],
                             risk_notes=["filings are unknown"],
                         ),
                         timestamp="2026-06-28T12:00:00Z",
@@ -116,11 +126,13 @@ def test_scan_small_caps_tool_returns_candidates():
     assert out["candidates"][0]["ticker"] == "HOT"
     assert out["candidates"][0]["grade"] == "A_WATCH"
     assert out["candidates"][0]["gap_basis"] == "premarket"
-    assert out["candidates"][0]["missing_fields"] == ["catalyst"]
+    assert out["candidates"][0]["missing_fields"] == ["short_interest"]
     assert out["candidates"][0]["evidence"]["float_shares"] == 8_000_000
+    assert out["candidates"][0]["evidence"]["catalysts"][0]["catalyst_quality"] == "hard"
+    assert out["candidates"][0]["evidence"]["catalysts"][0]["recency_minutes"] == 30.0
     assert out["candidates"][0]["evidence"]["is_low_float"] is True
     assert out["candidates"][0]["evidence"]["float_rotation"] == 2.0
-    assert "catalyst" in out["candidates"][0]["evidence"]["missing_fields"]
+    assert "short_interest" in out["candidates"][0]["evidence"]["missing_fields"]
 
 
 def test_scan_small_caps_tool_accepts_market_selection():
