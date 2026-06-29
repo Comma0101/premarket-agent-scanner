@@ -77,6 +77,7 @@ def test_small_cap_scanner_can_limit_market_universe_for_smoke_tests():
     class LimitedFakeScanner(FakeScanner):
         def scan(self, **kwargs):
             assert kwargs["tickers"] == ["HOT", "COOL"]
+            assert kwargs["max_workers"] == 6
             return ScanRunOutput(
                 run_id="run-1",
                 universe=None,
@@ -91,6 +92,6 @@ def test_small_cap_scanner_can_limit_market_universe_for_smoke_tests():
         scanner_service=LimitedFakeScanner(),
         market_universe_provider=FakeMarketProvider(),
         evidence_service=FakeEvidence(),
-    ).scan(market="us-listed", market_limit=2, preset_name="sykes_small_cap_v0")
+    ).scan(market="us-listed", market_limit=2, max_workers=6, preset_name="sykes_small_cap_v0")
 
     assert "Limited market universe to 2 symbol(s) for testing." in output.notes

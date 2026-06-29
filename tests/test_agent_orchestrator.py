@@ -150,6 +150,7 @@ def test_orchestrator_can_run_market_scan():
     packet = TradingAgentOrchestrator(dispatcher=fake_dispatch).run_sykes_small_cap_watchlist(
         market="us-listed",
         market_limit=100,
+        max_workers=6,
     )
 
     assert calls == [
@@ -159,6 +160,7 @@ def test_orchestrator_can_run_market_scan():
                 "preset_name": "sykes_small_cap_v0",
                 "market": "us-listed",
                 "market_limit": 100,
+                "max_workers": 6,
             },
         )
     ]

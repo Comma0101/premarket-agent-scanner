@@ -136,6 +136,14 @@ TOOLS: list[dict[str, Any]] = [
                         "Use only for smoke tests; omit for the full market."
                     ),
                 },
+                "max_workers": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Optional bounded worker count for broad market scans. "
+                        "Use a modest value to improve live scan latency without changing data rules."
+                    ),
+                },
                 "all_universes": {
                     "type": "boolean",
                     "description": "Scan every defined universe. Defaults to false.",

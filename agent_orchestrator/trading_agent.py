@@ -37,6 +37,7 @@ class TradingAgentOrchestrator:
         tickers: str | None = None,
         market: str | None = None,
         market_limit: int | None = None,
+        max_workers: int | None = None,
         all_universes: bool = False,
         user_query: str | None = None,
         db_path: str | None = None,
@@ -56,6 +57,8 @@ class TradingAgentOrchestrator:
         tool_input = {"preset_name": preset_name, **selection}
         if market_limit is not None:
             tool_input["market_limit"] = market_limit
+        if max_workers is not None:
+            tool_input["max_workers"] = max_workers
         result = self.dispatcher(
             "scan_small_caps",
             tool_input,

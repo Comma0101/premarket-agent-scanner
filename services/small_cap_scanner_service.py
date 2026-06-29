@@ -59,6 +59,7 @@ class SmallCapScannerService:
         all_universes: bool = False,
         market: str | None = None,
         market_limit: int | None = None,
+        max_workers: int | None = None,
     ) -> SmallCapScanOutput:
         preset = self.preset_service.get_preset(preset_name)
         run_ids: list[str] = []
@@ -99,6 +100,7 @@ class SmallCapScannerService:
             tickers=tickers,
             all_universes=all_universes,
             filters=filters,
+            max_workers=max_workers or 1,
         )
         run_ids.append(scan_run.run_id)
         notes.extend(scan_run.notes)

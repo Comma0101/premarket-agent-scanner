@@ -142,6 +142,7 @@ def test_scan_small_caps_tool_accepts_market_selection():
         def scan(self, **kwargs):
             assert kwargs["market"] == "us-listed"
             assert kwargs["market_limit"] == 25
+            assert kwargs["max_workers"] == 6
             return SmallCapScanOutput(
                 preset=kwargs["preset_name"],
                 run_ids=[],
@@ -153,6 +154,7 @@ def test_scan_small_caps_tool_accepts_market_selection():
     out = tools.scan_small_caps(
         market="us-listed",
         market_limit=25,
+        max_workers=6,
         preset_name="sykes_small_cap_v0",
         service=FakeSmallCapService(),
     )
@@ -252,3 +254,4 @@ def test_tool_definitions_are_well_formed():
     small_cap_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "scan_small_caps")
     assert "market" in small_cap_tool["input_schema"]["properties"]
     assert "market_limit" in small_cap_tool["input_schema"]["properties"]
+    assert "max_workers" in small_cap_tool["input_schema"]["properties"]
