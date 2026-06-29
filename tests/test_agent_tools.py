@@ -183,6 +183,45 @@ def test_dispatch_unknown_tool():
     assert "error" in definitions.dispatch("nope", {})
 
 
+def test_dispatch_logging_closes_connection(monkeypatch):
+    from app import db as app_db
+
+    class FakeConnection:
+        def __init__(self):
+            self.closed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def close(self):
+            self.closed = True
+
+    fake_conn = FakeConnection()
+    logged: list[dict] = []
+
+    def fake_log_agent_query(conn, **kwargs):
+        assert conn is fake_conn
+        logged.append(kwargs)
+
+    monkeypatch.setattr(app_db, "get_connection", lambda db_path: fake_conn)
+    monkeypatch.setattr(app_db, "log_agent_query", fake_log_agent_query)
+
+    out = definitions.dispatch(
+        "list_universes",
+        {},
+        user_query="what lists exist?",
+        db_path="fake.sqlite",
+    )
+
+    assert "universes" in out
+    assert fake_conn.closed is True
+    assert logged[0]["tool_name"] == "list_universes"
+    assert logged[0]["user_query"] == "what lists exist?"
+
+
 def test_tool_definitions_are_well_formed():
     names = {t["name"] for t in definitions.TOOLS}
     assert names == {

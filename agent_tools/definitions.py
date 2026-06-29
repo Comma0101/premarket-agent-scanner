@@ -12,6 +12,7 @@ tools.py, logs the call to the agent_queries table, and returns the JSON result.
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import Any, Callable
 
 from agent_tools import tools
@@ -221,7 +222,7 @@ def _log(
 
         count = result.get("result_count", result.get("candidate_count", ""))
         summary = result.get("error") or f"{count} result(s)".strip()
-        with get_connection(db_path) as conn:
+        with closing(get_connection(db_path)) as conn:
             log_agent_query(
                 conn,
                 user_query=user_query,
