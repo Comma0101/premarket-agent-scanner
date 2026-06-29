@@ -248,6 +248,13 @@ source; it is not used as the official market symbol master.
 
 The output is watchlist context only, not buy/sell advice.
 
+## Known limitations
+
+`SmallCapEvidenceService.enrich_candidates` currently does profile and filings
+lookups serially per candidate. That is acceptable for a short watchlist, but
+should be batched or made concurrent before running evidence enrichment behind
+an unrestricted full-market scan.
+
 List universes:
 
 ```bash
