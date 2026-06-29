@@ -73,16 +73,18 @@ class TraderContextService:
             technicals["intraday"] = intraday
             if intraday is None:
                 _append_unique(missing_fields, "intraday_bars")
-            elif intraday.get("confidence") == "ERROR":
-                _append_unique(missing_fields, "intraday_bars")
+            else:
+                for field in intraday.get("missing_fields") or []:
+                    _append_unique(missing_fields, field)
 
         if include_daily:
             daily = self._build_daily_packet(normalized)
             technicals["daily"] = daily
             if daily is None:
                 _append_unique(missing_fields, "daily_bars")
-            elif daily.get("confidence") == "ERROR":
-                _append_unique(missing_fields, "daily_bars")
+            else:
+                for field in daily.get("missing_fields") or []:
+                    _append_unique(missing_fields, field)
 
         return {
             "ticker": normalized,

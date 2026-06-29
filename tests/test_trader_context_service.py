@@ -121,6 +121,20 @@ class FakeBarProvider:
         return IntradayBarSeries("HOT", timeframe, bars, self.source_name, "intra-fetch")
 
 
+class EmptyBarProvider:
+    source_name = "empty-bars"
+
+    def get_bars(
+        self,
+        ticker,
+        timeframe="2Min",
+        start=None,
+        end=None,
+        limit=100,
+    ):
+        return IntradayBarSeries("HOT", timeframe, [], self.source_name, "empty-fetch")
+
+
 def test_trader_context_includes_snapshot_and_evidence():
     service = TraderContextService(
         snapshot_service=FakeSnapshotService(),
@@ -182,5 +196,24 @@ def test_trader_context_surfaces_missing_optional_technicals_without_inference()
 
     assert context["technicals"]["intraday"] is None
     assert context["technicals"]["daily"] is None
+    assert "intraday_bars" in context["missing_fields"]
+    assert "daily_bars" in context["missing_fields"]
+
+
+def test_trader_context_bubbles_empty_bar_missing_fields_to_top_level():
+    service = TraderContextService(
+        snapshot_service=FakeSnapshotService(),
+        evidence_service=FakeEvidenceService(),
+        bar_provider=EmptyBarProvider(),
+    )
+
+    context = service.build_context(
+        "HOT",
+        include_intraday=True,
+        include_daily=True,
+    )
+
+    assert context["technicals"]["intraday"]["confidence"] == "LOW_CONFIDENCE"
+    assert context["technicals"]["daily"]["confidence"] == "LOW_CONFIDENCE"
     assert "intraday_bars" in context["missing_fields"]
     assert "daily_bars" in context["missing_fields"]
