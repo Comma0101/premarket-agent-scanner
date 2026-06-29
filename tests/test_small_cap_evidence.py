@@ -240,6 +240,27 @@ class RaisingFilingProvider:
         raise RuntimeError("sec offline")
 
 
+class FakeNewsProvider:
+    def get_recent_news(self, ticker: str):
+        return [
+            CatalystEvent(
+                ticker=ticker,
+                headline=f"{ticker} announces FDA clearance",
+                published_at="2026-06-29T12:00:00Z",
+                source="fake-wire",
+                url=f"https://example.test/news/{ticker.lower()}",
+                summary="FDA clearance",
+                confidence="OK",
+                catalyst_quality="hard",
+            )
+        ]
+
+
+class RaisingNewsProvider:
+    def get_recent_news(self, ticker: str):
+        raise RuntimeError("news offline")
+
+
 def _candidate(ticker="HOT"):
     return SmallCapCandidate(
         ticker=ticker,
@@ -401,6 +422,41 @@ def test_evidence_service_uses_cached_filings_news_and_runner_history(tmp_path):
     assert "filings" not in enriched.evidence.missing_fields
     assert "catalyst" not in enriched.evidence.missing_fields
     assert "former_runner" not in enriched.evidence.missing_fields
+
+
+def test_evidence_service_fetches_and_caches_news_when_cache_empty(tmp_path):
+    db_path = tmp_path / "evidence.sqlite"
+    service = SmallCapEvidenceService(
+        profile_service=FakeProfileService(),
+        filing_provider=None,
+        news_provider=FakeNewsProvider(),
+        db_path=str(db_path),
+    )
+
+    enriched = service.enrich_candidates([_candidate()])[0]
+    cached = get_cached_news(db_path, "HOT")
+
+    assert enriched.evidence is not None
+    assert enriched.evidence.catalysts[0].headline == "HOT announces FDA clearance"
+    assert enriched.evidence.catalysts[0].catalyst_quality == "hard"
+    assert "catalyst" not in enriched.evidence.missing_fields
+    assert cached[0].headline == "HOT announces FDA clearance"
+
+
+def test_evidence_service_surfaces_news_provider_failure_as_unknown(tmp_path):
+    service = SmallCapEvidenceService(
+        profile_service=FakeProfileService(),
+        filing_provider=None,
+        news_provider=RaisingNewsProvider(),
+        db_path=str(tmp_path / "evidence.sqlite"),
+    )
+
+    enriched = service.enrich_candidates([_candidate()])[0]
+
+    assert enriched.evidence is not None
+    assert enriched.evidence.catalysts == []
+    assert "catalyst" in enriched.evidence.missing_fields
+    assert any("news offline" in note for note in enriched.evidence.risk_notes)
 
 
 def test_evidence_service_surfaces_filing_provider_failure_as_unknown():

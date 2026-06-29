@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.db import get_cached_filings, get_cached_news, get_runner_history
+from app.db import (
+    get_cached_filings,
+    get_cached_news,
+    get_runner_history,
+    insert_news_event,
+)
 from app.models import AssetProfile, FilingEvent, SmallCapCandidate, SmallCapEvidence
 from providers.sec_provider import SECProvider
 from services.profile_service import ProfileService
@@ -30,6 +35,7 @@ class SmallCapEvidenceService:
         self.low_float_threshold = low_float_threshold
         self._profile_error_by_ticker: dict[str, str] = {}
         self._filing_error_by_ticker: dict[str, str] = {}
+        self._news_error_by_ticker: dict[str, str] = {}
 
     def enrich_candidates(self, candidates: list[SmallCapCandidate]) -> list[SmallCapCandidate]:
         for candidate in candidates:
@@ -43,7 +49,8 @@ class SmallCapEvidenceService:
         profile_error = self._profile_error_by_ticker.get(candidate.ticker.upper())
         filings = self._get_recent_filings(candidate.ticker)
         filing_error = self._filing_error_by_ticker.get(candidate.ticker.upper())
-        catalysts = self._get_cached_catalysts(candidate.ticker)
+        catalysts = self._get_recent_catalysts(candidate.ticker)
+        news_error = self._news_error_by_ticker.get(candidate.ticker.upper())
         former_runner = self._get_cached_former_runner(candidate.ticker)
 
         if profile is not None:
@@ -83,6 +90,11 @@ class SmallCapEvidenceService:
                 _append_unique(evidence.sources, catalyst.source)
                 if catalyst.url:
                     _append_unique(evidence.sources, catalyst.url)
+        elif news_error:
+            _append_unique(
+                evidence.risk_notes,
+                f"news lookup failed: {news_error}; catalyst is unknown.",
+            )
 
         if former_runner is not None:
             evidence.former_runner = former_runner
@@ -184,8 +196,26 @@ class SmallCapEvidenceService:
             return []
         return filings if isinstance(filings, list) else []
 
-    def _get_cached_catalysts(self, ticker: str):
-        return get_cached_news(self.db_path, ticker)
+    def _get_recent_catalysts(self, ticker: str):
+        normalized = ticker.upper()
+        self._news_error_by_ticker.pop(normalized, None)
+        cached = get_cached_news(self.db_path, ticker)
+        if cached:
+            return cached
+
+        get_recent_news = getattr(self.news_provider, "get_recent_news", None)
+        if not callable(get_recent_news):
+            return []
+        try:
+            catalysts = get_recent_news(ticker)
+        except Exception as exc:
+            self._news_error_by_ticker[normalized] = str(exc)
+            return []
+        if not isinstance(catalysts, list):
+            return []
+        for catalyst in catalysts:
+            insert_news_event(self.db_path, catalyst)
+        return catalysts
 
     def _get_cached_former_runner(self, ticker: str):
         history = get_runner_history(self.db_path, ticker, limit=1)
