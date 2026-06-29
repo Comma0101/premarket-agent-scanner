@@ -96,6 +96,7 @@ def _small_cap_evidence_to_dict(
         "float_source": evidence.float_source,
         "exchange": evidence.exchange,
         "is_low_float": evidence.is_low_float,
+        "float_rotation": evidence.float_rotation,
         "filings": [_filing_event_to_dict(filing) for filing in evidence.filings],
         "catalysts": [
             _catalyst_event_to_dict(catalyst) for catalyst in evidence.catalysts

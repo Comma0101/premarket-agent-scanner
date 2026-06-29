@@ -197,6 +197,9 @@ def _evidence_summary(
         label = _format_share_count(float_shares)
         if evidence.get("is_low_float") is True:
             label = f"{label} low"
+        rotation = _optional_float(evidence.get("float_rotation"))
+        if rotation is not None:
+            label = f"{label} rot={rotation:.1f}x"
         parts.append(f"float={label}")
 
     catalysts = evidence.get("catalysts")

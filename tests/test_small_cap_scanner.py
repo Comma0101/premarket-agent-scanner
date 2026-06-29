@@ -80,6 +80,7 @@ def test_scan_small_caps_cli_formats_compact_evidence_summary():
         ticker="HOT",
         float_shares=8_000_000,
         is_low_float=True,
+        float_rotation=2.0,
         catalysts=[
             CatalystEvent(
                 ticker="HOT",
@@ -104,6 +105,7 @@ def test_scan_small_caps_cli_formats_compact_evidence_summary():
 
     assert len(summary) <= 32
     assert "8.0M" in summary
+    assert "2.0x" in summary
     assert "cat" in summary
     assert "offering" in summary
     assert "former" in summary or "prev" in summary
