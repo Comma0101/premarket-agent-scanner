@@ -7,7 +7,16 @@ from pathlib import Path
 from typing import Any
 
 from app.config import get_config
-from app.models import AssetProfile, CombinedSnapshot, ScannerResult, model_to_dict, utc_now_iso
+from app.models import (
+    AssetProfile,
+    CatalystEvent,
+    CombinedSnapshot,
+    FilingEvent,
+    FormerRunnerEvent,
+    ScannerResult,
+    model_to_dict,
+    utc_now_iso,
+)
 
 
 SCHEMA_SQL = """
@@ -90,6 +99,49 @@ CREATE TABLE IF NOT EXISTS api_usage (
     count INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (provider, usage_date)
 );
+
+CREATE TABLE IF NOT EXISTS ticker_filings (
+    ticker TEXT NOT NULL,
+    form_type TEXT NOT NULL,
+    filed_at TEXT NOT NULL,
+    accession_number TEXT NOT NULL,
+    description TEXT,
+    source_url TEXT,
+    risk_tags_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (ticker, accession_number)
+);
+
+CREATE TABLE IF NOT EXISTS ticker_news (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    headline TEXT NOT NULL,
+    published_at TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL,
+    url TEXT,
+    summary TEXT,
+    confidence TEXT NOT NULL DEFAULT 'UNKNOWN',
+    updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ticker_news_url
+ON ticker_news(ticker, url)
+WHERE url IS NOT NULL AND url <> '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ticker_news_no_url
+ON ticker_news(ticker, headline, published_at)
+WHERE url IS NULL OR url = '';
+
+CREATE TABLE IF NOT EXISTS ticker_runner_history (
+    ticker TEXT NOT NULL,
+    event_date TEXT NOT NULL,
+    max_gap_pct REAL,
+    max_volume REAL,
+    source_run_id TEXT NOT NULL DEFAULT '',
+    notes_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (ticker, event_date, source_run_id)
+);
 """
 
 
@@ -125,6 +177,17 @@ def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return dict(row)
+
+
+def _json_dumps_list(values: list[Any] | None) -> str:
+    return json.dumps(values or [], sort_keys=True)
+
+
+def _json_loads_list(value: str | None) -> list[Any]:
+    if not value:
+        return []
+    parsed = json.loads(value)
+    return parsed if isinstance(parsed, list) else []
 
 
 def upsert_asset(conn: sqlite3.Connection, profile: AssetProfile) -> None:
@@ -214,6 +277,273 @@ def insert_snapshot(conn: sqlite3.Connection, snapshot: CombinedSnapshot) -> Non
         ),
     )
     conn.commit()
+
+
+def insert_filing_event(db_path: str | Path | None, event: FilingEvent) -> None:
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO ticker_filings (
+                ticker, form_type, filed_at, accession_number, description,
+                source_url, risk_tags_json, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticker, accession_number) DO UPDATE SET
+                form_type = excluded.form_type,
+                filed_at = excluded.filed_at,
+                description = excluded.description,
+                source_url = excluded.source_url,
+                risk_tags_json = excluded.risk_tags_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                event.ticker.upper(),
+                event.form_type,
+                event.filed_at,
+                event.accession_number,
+                event.description,
+                event.source_url,
+                _json_dumps_list(event.risk_tags),
+                utc_now_iso(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_cached_filings(
+    db_path: str | Path | None,
+    ticker: str,
+    limit: int = 10,
+) -> list[FilingEvent]:
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM ticker_filings
+            WHERE ticker = ?
+            ORDER BY filed_at DESC, accession_number DESC
+            LIMIT ?
+            """,
+            (ticker.upper(), max(0, int(limit))),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        FilingEvent(
+            ticker=row["ticker"],
+            form_type=row["form_type"],
+            filed_at=row["filed_at"],
+            accession_number=row["accession_number"],
+            description=row["description"],
+            source_url=row["source_url"],
+            risk_tags=_json_loads_list(row["risk_tags_json"]),
+        )
+        for row in rows
+    ]
+
+
+def insert_news_event(db_path: str | Path | None, event: CatalystEvent) -> None:
+    conn = get_connection(db_path)
+    ticker = event.ticker.upper()
+    published_at = event.published_at or ""
+    url = event.url or None
+    updated_at = utc_now_iso()
+    try:
+        if url:
+            existing = conn.execute(
+                """
+                SELECT rowid AS row_id
+                FROM ticker_news
+                WHERE ticker = ? AND url = ?
+                ORDER BY updated_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                (ticker, url),
+            ).fetchone()
+        else:
+            existing = conn.execute(
+                """
+                SELECT rowid AS row_id
+                FROM ticker_news
+                WHERE ticker = ?
+                    AND headline = ?
+                    AND published_at = ?
+                    AND (url IS NULL OR url = '')
+                ORDER BY updated_at DESC, rowid DESC
+                LIMIT 1
+                """,
+                (ticker, event.headline, published_at),
+            ).fetchone()
+
+        if existing is not None:
+            row_id = existing["row_id"]
+            conn.execute(
+                """
+                UPDATE ticker_news
+                SET headline = ?,
+                    published_at = ?,
+                    source = ?,
+                    url = ?,
+                    summary = ?,
+                    confidence = ?,
+                    updated_at = ?
+                WHERE rowid = ?
+                """,
+                (
+                    event.headline,
+                    published_at,
+                    event.source,
+                    url,
+                    event.summary,
+                    event.confidence,
+                    updated_at,
+                    row_id,
+                ),
+            )
+            if url:
+                conn.execute(
+                    """
+                    DELETE FROM ticker_news
+                    WHERE ticker = ? AND url = ? AND rowid <> ?
+                    """,
+                    (ticker, url, row_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    DELETE FROM ticker_news
+                    WHERE ticker = ?
+                        AND headline = ?
+                        AND published_at = ?
+                        AND (url IS NULL OR url = '')
+                        AND rowid <> ?
+                    """,
+                    (ticker, event.headline, published_at, row_id),
+                )
+            conn.commit()
+            return
+
+        conn.execute(
+            """
+            INSERT INTO ticker_news (
+                ticker, headline, published_at, source, url, summary, confidence, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ticker,
+                event.headline,
+                published_at,
+                event.source,
+                url,
+                event.summary,
+                event.confidence,
+                updated_at,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_cached_news(
+    db_path: str | Path | None,
+    ticker: str,
+    limit: int = 10,
+) -> list[CatalystEvent]:
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM ticker_news
+            WHERE ticker = ?
+            ORDER BY published_at DESC, headline ASC
+            LIMIT ?
+            """,
+            (ticker.upper(), max(0, int(limit))),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        CatalystEvent(
+            ticker=row["ticker"],
+            headline=row["headline"],
+            published_at=row["published_at"] or None,
+            source=row["source"],
+            url=row["url"],
+            summary=row["summary"],
+            confidence=row["confidence"],
+        )
+        for row in rows
+    ]
+
+
+def insert_runner_event(db_path: str | Path | None, event: FormerRunnerEvent) -> None:
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO ticker_runner_history (
+                ticker, event_date, max_gap_pct, max_volume, source_run_id,
+                notes_json, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticker, event_date, source_run_id) DO UPDATE SET
+                max_gap_pct = excluded.max_gap_pct,
+                max_volume = excluded.max_volume,
+                notes_json = excluded.notes_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                event.ticker.upper(),
+                event.event_date,
+                event.max_gap_pct,
+                event.max_volume,
+                event.source_run_id or "",
+                _json_dumps_list(event.notes),
+                utc_now_iso(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_runner_history(
+    db_path: str | Path | None,
+    ticker: str,
+    limit: int = 5,
+) -> list[FormerRunnerEvent]:
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM ticker_runner_history
+            WHERE ticker = ?
+            ORDER BY event_date DESC, max_gap_pct DESC
+            LIMIT ?
+            """,
+            (ticker.upper(), max(0, int(limit))),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        FormerRunnerEvent(
+            ticker=row["ticker"],
+            event_date=row["event_date"],
+            max_gap_pct=row["max_gap_pct"],
+            max_volume=row["max_volume"],
+            source_run_id=row["source_run_id"] or None,
+            notes=_json_loads_list(row["notes_json"]),
+        )
+        for row in rows
+    ]
 
 
 def create_scanner_run(

@@ -195,6 +195,55 @@ class ScannerResult:
 
 
 @dataclass
+class FilingEvent:
+    ticker: str
+    form_type: str
+    filed_at: str
+    accession_number: str
+    description: str | None = None
+    source_url: str | None = None
+    risk_tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CatalystEvent:
+    ticker: str
+    headline: str
+    published_at: str | None
+    source: str
+    url: str | None = None
+    summary: str | None = None
+    confidence: str = "UNKNOWN"
+
+
+@dataclass
+class FormerRunnerEvent:
+    ticker: str
+    event_date: str
+    max_gap_pct: float | None = None
+    max_volume: float | None = None
+    source_run_id: str | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SmallCapEvidence:
+    ticker: str
+    float_shares: float | None = None
+    shares_outstanding: float | None = None
+    float_source: str | None = None
+    exchange: str | None = None
+    is_low_float: bool | None = None
+    filings: list[FilingEvent] = field(default_factory=list)
+    catalysts: list[CatalystEvent] = field(default_factory=list)
+    former_runner: FormerRunnerEvent | None = None
+    missing_fields: list[str] = field(default_factory=list)
+    risk_notes: list[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+
+@dataclass
 class SmallCapCandidate:
     ticker: str
     name: str | None
@@ -210,6 +259,7 @@ class SmallCapCandidate:
     missing_fields: list[str] = field(default_factory=list)
     risk_notes: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
+    evidence: SmallCapEvidence | None = None
     timestamp: str | None = None
 
 
