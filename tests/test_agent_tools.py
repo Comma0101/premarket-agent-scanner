@@ -207,6 +207,20 @@ def test_scan_small_caps_tool_can_opt_into_live_catalyst_refresh(monkeypatch):
     assert out["notes"][0].startswith("Live catalyst RSS refresh enabled")
 
 
+def test_scan_small_caps_tool_surfaces_market_selection_errors():
+    class RaisingSmallCapService:
+        def scan(self, **kwargs):
+            raise ValueError("market universe unavailable")
+
+    out = tools.scan_small_caps(
+        market="us-listed",
+        preset_name="sykes_small_cap_v0",
+        service=RaisingSmallCapService(),
+    )
+
+    assert out == {"error": "market universe unavailable"}
+
+
 def test_list_universes_tool_shape():
     out = tools.list_universes(service=UniverseService())
     assert "MAG7" in out["universes"]
@@ -544,6 +558,50 @@ def test_explain_ticker_as_trader_tool_requires_ticker():
     assert "error" in out
 
 
+def test_run_desk_tool_returns_aggregated_views():
+    class FakeDeskRunService:
+        def run(self, **kwargs):
+            assert kwargs["tickers"] == ["MRVL", "HOOD"]
+            assert kwargs["trader_profiles"] == ["lance_breitstein"]
+            assert kwargs["include_intraday"] is True
+            assert kwargs["include_daily"] is False
+            assert kwargs["refresh_catalysts"] is False
+            return {
+                "ticker_count": 2,
+                "trader_profiles": ["lance_breitstein"],
+                "tickers": [
+                    {
+                        "ticker": "MRVL",
+                        "data_quality": {
+                            "gap_basis": "last_trade",
+                            "confidence": "STALE_DATA",
+                            "as_of": "2026-06-29T20:00:00Z",
+                            "sources": ["fake"],
+                        },
+                        "views": {"lance_breitstein": {"ticker": "MRVL"}},
+                        "errors": [],
+                    }
+                ],
+                "disclaimer": "Matches your filter — not buy/sell advice. Verify before acting.",
+            }
+
+    out = tools.run_desk(
+        tickers="MRVL, HOOD",
+        trader_profiles=["lance_breitstein"],
+        include_intraday=True,
+        service=FakeDeskRunService(),
+    )
+
+    assert out["ticker_count"] == 2
+    assert out["trader_profiles"] == ["lance_breitstein"]
+    assert out["tickers"][0]["ticker"] == "MRVL"
+
+
+def test_run_desk_tool_requires_tickers():
+    out = tools.run_desk(tickers=[])
+    assert "error" in out
+
+
 def test_get_trader_context_tool_requires_ticker():
     out = tools.get_trader_context(ticker="")
     assert "error" in out
@@ -656,6 +714,7 @@ def test_tool_definitions_are_well_formed():
         "scan_grittani_morning_panic",
         "get_trader_context",
         "explain_ticker_as_trader",
+        "run_desk",
         "list_universes",
         "get_ticker_snapshot",
     }
@@ -694,3 +753,7 @@ def test_tool_definitions_are_well_formed():
 
     explain_context_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "explain_ticker_as_trader")
     assert explain_context_tool["input_schema"]["required"] == ["ticker"]
+
+    run_desk_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "run_desk")
+    assert run_desk_tool["input_schema"]["required"] == ["tickers"]
+    assert "trader_profiles" in run_desk_tool["input_schema"]["properties"]

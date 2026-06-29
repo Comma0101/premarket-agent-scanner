@@ -426,6 +426,65 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "run_desk",
+        "description": (
+            "Run a grounded Desk packet across explicit tickers and trader "
+            "profiles. Use this when the user wants the desk view for multiple "
+            "names. The output contains data quality, missing fields, errors, "
+            "and profile explanations; it is not buy/sell advice."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tickers": {
+                    "oneOf": [
+                        {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                        },
+                        {"type": "string"},
+                    ],
+                    "description": (
+                        "Ticker symbols as an array or comma-separated string, "
+                        "e.g. ['MRVL', 'HOOD'] or 'MRVL,HOOD'."
+                    ),
+                },
+                "trader_profiles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Trader profile keys to run. Defaults to all active "
+                        "profiles: timothy_sykes, lance_breitstein, alex_temiz, "
+                        "and tim_grittani."
+                    ),
+                },
+                "include_intraday": {
+                    "type": "boolean",
+                    "description": (
+                        "Include intraday bar-derived context when available. "
+                        "Defaults to false."
+                    ),
+                },
+                "include_daily": {
+                    "type": "boolean",
+                    "description": (
+                        "Include daily bar-derived context when available. "
+                        "Defaults to false."
+                    ),
+                },
+                "refresh_catalysts": {
+                    "type": "boolean",
+                    "description": (
+                        "Opt in to live RSS catalyst lookup during evidence "
+                        "enrichment. Defaults to false."
+                    ),
+                },
+            },
+            "required": ["tickers"],
+        },
+    },
+    {
         "name": "list_universes",
         "description": (
             "List the defined universes and watchlists with their member tickers. "
@@ -469,6 +528,7 @@ _DISPATCH: dict[str, Callable[..., dict[str, Any]]] = {
     "scan_grittani_morning_panic": tools.scan_grittani_morning_panic,
     "get_trader_context": tools.get_trader_context,
     "explain_ticker_as_trader": tools.explain_ticker_as_trader,
+    "run_desk": tools.run_desk,
     "list_universes": tools.list_universes,
     "get_ticker_snapshot": tools.get_ticker_snapshot,
 }

@@ -380,7 +380,7 @@ def scan_small_caps(
             market_limit=market_limit,
             max_workers=max_workers,
         )
-    except KeyError as exc:
+    except (KeyError, ValueError) as exc:
         return {"error": str(exc)}
 
     notes = list(output.notes)
@@ -691,6 +691,53 @@ def explain_ticker_as_trader(
     from services.desk_explainer import build_trader_context_explanation
 
     return build_trader_context_explanation(context)
+
+
+def run_desk(
+    *,
+    tickers: list[str] | str,
+    trader_profiles: list[str] | None = None,
+    include_intraday: bool = False,
+    include_daily: bool = False,
+    refresh_catalysts: bool = False,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    """Run one grounded Desk packet across tickers and trader profiles."""
+    normalized_tickers = _normalize_ticker_list(tickers)
+    if not normalized_tickers:
+        return {"error": "tickers is required and must be non-empty."}
+
+    if service is None:
+        from services.desk_run_service import DeskRunService
+
+        service = DeskRunService()
+
+    try:
+        return service.run(
+            tickers=normalized_tickers,
+            trader_profiles=trader_profiles,
+            include_intraday=include_intraday,
+            include_daily=include_daily,
+            refresh_catalysts=refresh_catalysts,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+def _normalize_ticker_list(tickers: list[str] | str) -> list[str]:
+    if isinstance(tickers, str):
+        raw = tickers.split(",")
+    else:
+        raw = tickers
+    normalized: list[str] = []
+    seen = set()
+    for ticker in raw:
+        value = str(ticker).strip().upper()
+        if not value or value in seen:
+            continue
+        normalized.append(value)
+        seen.add(value)
+    return normalized
 
 
 def list_universes(*, service: UniverseService | None = None) -> dict[str, Any]:
