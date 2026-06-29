@@ -238,6 +238,7 @@ class SmallCapEvidence:
     float_source: str | None = None
     exchange: str | None = None
     is_low_float: bool | None = None
+    float_rotation: float | None = None
     filings: list[FilingEvent] = field(default_factory=list)
     catalysts: list[CatalystEvent] = field(default_factory=list)
     former_runner: FormerRunnerEvent | None = None

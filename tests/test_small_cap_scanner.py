@@ -15,6 +15,7 @@ from app.models import (
     SmallCapEvidence,
 )
 from cli.scan_small_caps import _format_evidence_float
+from services.scanner_service import compute_float_rotation
 from services.scanner_preset_service import PresetService
 from services.small_cap_scanner_service import (
     SmallCapScannerService,
@@ -26,6 +27,14 @@ def test_scan_small_caps_cli_imports():
     import cli.scan_small_caps as module
 
     assert module.app is not None
+
+
+def test_compute_float_rotation():
+    assert compute_float_rotation(5_000_000, 5_000_000) == 1.0
+    assert compute_float_rotation(2_000_000, 8_000_000) == 0.25
+    assert compute_float_rotation(1_000_000, None) is None
+    assert compute_float_rotation(None, 8_000_000) is None
+    assert compute_float_rotation(1_000_000, 0) is None
 
 
 def test_scan_small_caps_cli_formats_evidence_float():
