@@ -203,6 +203,20 @@ class RaisingProfileService:
         raise RuntimeError("profile offline")
 
 
+class ProfileWithoutFloatService:
+    def get_profile(self, ticker: str):
+        return AssetProfile(
+            ticker=ticker,
+            exchange="NASDAQ",
+            shares_outstanding=20_000_000,
+            float_shares=None,
+            source="fmp",
+        )
+
+    def resolve_float(self, ticker: str):
+        return 8_000_000, "yfinance"
+
+
 class FakeFilingProvider:
     def get_recent_filings(self, ticker: str):
         return [
@@ -297,6 +311,20 @@ def test_evidence_service_keeps_float_unknown_when_profile_lookup_fails():
         "profile lookup" in note or "profile offline" in note
         for note in enriched.evidence.risk_notes
     )
+
+
+def test_evidence_service_backfills_missing_profile_float_from_resolved_source():
+    service = SmallCapEvidenceService(profile_service=ProfileWithoutFloatService())
+    candidate = _candidate()
+    candidate.volume = 16_000_000
+
+    enriched = service.enrich_candidates([candidate])[0]
+
+    assert enriched.evidence is not None
+    assert enriched.evidence.float_shares == 8_000_000
+    assert enriched.evidence.float_source == "yfinance"
+    assert enriched.evidence.float_rotation == 2.0
+    assert enriched.evidence.is_low_float is True
 
 
 def test_classify_filing_risk_tags_offering_forms():
