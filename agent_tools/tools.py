@@ -112,6 +112,11 @@ def _small_cap_evidence_to_dict(
 
 
 def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
+    missing_fields = (
+        candidate.evidence.missing_fields
+        if candidate.evidence is not None
+        else candidate.missing_fields
+    )
     return {
         "ticker": candidate.ticker,
         "name": candidate.name,
@@ -124,7 +129,7 @@ def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
         "score": candidate.score,
         "grade": candidate.grade,
         "matched_signals": candidate.matched_signals,
-        "missing_fields": candidate.missing_fields,
+        "missing_fields": missing_fields,
         "risk_notes": candidate.risk_notes,
         "sources": candidate.sources,
         "evidence": _small_cap_evidence_to_dict(candidate.evidence),

@@ -218,6 +218,11 @@ class FakeFilingProvider:
         ]
 
 
+class RaisingFilingProvider:
+    def get_recent_filings(self, ticker: str):
+        raise RuntimeError("sec offline")
+
+
 def _candidate(ticker="HOT"):
     return SmallCapCandidate(
         ticker=ticker,
@@ -289,3 +294,85 @@ def test_evidence_service_attaches_recent_filings_and_removes_missing_field():
     assert enriched.evidence.filings[0].form_type == "S-1"
     assert "filings" not in enriched.evidence.missing_fields
     assert any("offering" in note.lower() for note in enriched.evidence.risk_notes)
+
+
+def test_evidence_service_uses_cached_filings_news_and_runner_history(tmp_path):
+    db_path = tmp_path / "evidence.sqlite"
+    insert_filing_event(
+        db_path,
+        FilingEvent(
+            ticker="HOT",
+            form_type="S-3",
+            filed_at="2026-06-26",
+            accession_number="0000000000-26-000003",
+            description="Shelf registration statement",
+            source_url="https://www.sec.gov/Archives/example-s3",
+            risk_tags=["offering"],
+        ),
+    )
+    insert_news_event(
+        db_path,
+        CatalystEvent(
+            ticker="HOT",
+            headline="HOT wins supply deal",
+            published_at="2026-06-28T11:45:00Z",
+            source="fake-wire",
+            url="https://example.test/news/hot",
+            summary="Supply deal",
+            confidence="OK",
+        ),
+    )
+    insert_runner_event(
+        db_path,
+        FormerRunnerEvent(
+            ticker="HOT",
+            event_date="2026-06-01",
+            max_gap_pct=120.0,
+            max_volume=9_000_000,
+            source_run_id="prior-run",
+            notes=["prior runner"],
+        ),
+    )
+    service = SmallCapEvidenceService(
+        profile_service=FakeProfileService(),
+        filing_provider=None,
+        db_path=str(db_path),
+    )
+
+    enriched = service.enrich_candidates([_candidate()])[0]
+
+    assert enriched.evidence is not None
+    assert enriched.evidence.filings[0].form_type == "S-3"
+    assert enriched.evidence.catalysts[0].headline == "HOT wins supply deal"
+    assert enriched.evidence.former_runner is not None
+    assert "filings" not in enriched.evidence.missing_fields
+    assert "catalyst" not in enriched.evidence.missing_fields
+    assert "former_runner" not in enriched.evidence.missing_fields
+
+
+def test_evidence_service_surfaces_filing_provider_failure_as_unknown():
+    service = SmallCapEvidenceService(
+        profile_service=FakeProfileService(),
+        filing_provider=RaisingFilingProvider(),
+    )
+
+    enriched = service.enrich_candidates([_candidate()])[0]
+
+    assert enriched.evidence is not None
+    assert enriched.evidence.filings == []
+    assert "filings" in enriched.evidence.missing_fields
+    assert any("sec offline" in note for note in enriched.evidence.risk_notes)
+
+
+def test_evidence_service_syncs_candidate_missing_fields_after_enrichment():
+    service = SmallCapEvidenceService(
+        profile_service=FakeProfileService(),
+        filing_provider=FakeFilingProvider(),
+    )
+
+    enriched = service.enrich_candidates([_candidate()])[0]
+
+    assert enriched.evidence is not None
+    assert enriched.missing_fields == enriched.evidence.missing_fields
+    assert "float" not in enriched.missing_fields
+    assert "filings" not in enriched.missing_fields

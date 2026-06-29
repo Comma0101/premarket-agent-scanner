@@ -30,14 +30,11 @@ class SECProvider:
         if not normalized or limit <= 0:
             return []
 
-        try:
-            cik = self._resolve_cik(normalized)
-            if cik is None:
-                return []
-            payload = self._request_json(self.submissions_url_template.format(cik=cik))
-            return self._parse_recent_filings(normalized, cik, payload, limit)
-        except Exception:
+        cik = self._resolve_cik(normalized)
+        if cik is None:
             return []
+        payload = self._request_json(self.submissions_url_template.format(cik=cik))
+        return self._parse_recent_filings(normalized, cik, payload, limit)
 
     def _resolve_cik(self, ticker: str) -> str | None:
         if ticker in self._cik_by_ticker:

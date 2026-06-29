@@ -113,7 +113,7 @@ def test_scan_small_caps_tool_returns_candidates():
     assert out["candidate_count"] == 1
     assert out["candidates"][0]["ticker"] == "HOT"
     assert out["candidates"][0]["grade"] == "A_WATCH"
-    assert "float" in out["candidates"][0]["missing_fields"]
+    assert out["candidates"][0]["missing_fields"] == ["catalyst"]
     assert out["candidates"][0]["evidence"]["float_shares"] == 8_000_000
     assert out["candidates"][0]["evidence"]["is_low_float"] is True
     assert "catalyst" in out["candidates"][0]["evidence"]["missing_fields"]
