@@ -33,6 +33,7 @@ class AgentWatchCandidate:
     missing_fields: list[str] = field(default_factory=list)
     risk_notes: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
+    gap_basis: str | None = None
 
 
 @dataclass

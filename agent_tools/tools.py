@@ -124,6 +124,7 @@ def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
         "market_cap": candidate.market_cap,
         "gap_pct": candidate.gap_pct,
         "gap_dollar": candidate.gap_dollar,
+        "gap_basis": candidate.gap_basis,
         "volume": candidate.volume,
         "rel_volume": candidate.rel_volume,
         "confidence": candidate.confidence,

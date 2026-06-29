@@ -157,6 +157,7 @@ def _agent_candidate(raw: dict[str, Any], bucket: WatchBucket) -> AgentWatchCand
     missing_fields = _string_list(
         evidence.get("missing_fields") if evidence is not None else raw.get("missing_fields")
     )
+    gap_basis = _optional_string(raw.get("gap_basis"))
     return AgentWatchCandidate(
         ticker=str(raw.get("ticker") or "").upper(),
         name=raw.get("name"),
@@ -173,15 +174,24 @@ def _agent_candidate(raw: dict[str, Any], bucket: WatchBucket) -> AgentWatchCand
         missing_fields=missing_fields,
         risk_notes=_string_list(raw.get("risk_notes")),
         sources=_string_list(raw.get("sources")),
-        evidence_summary=_evidence_summary(evidence),
+        evidence_summary=_evidence_summary(evidence, gap_basis=gap_basis),
+        gap_basis=gap_basis,
     )
 
 
-def _evidence_summary(evidence: dict[str, Any] | None) -> str:
-    if evidence is None:
-        return "evidence=unknown"
-
+def _evidence_summary(
+    evidence: dict[str, Any] | None,
+    *,
+    gap_basis: str | None = None,
+) -> str:
     parts: list[str] = []
+    if gap_basis:
+        parts.append(f"gap_basis={gap_basis}")
+
+    if evidence is None:
+        parts.append("evidence=unknown")
+        return "; ".join(parts)
+
     float_shares = _optional_float(evidence.get("float_shares"))
     if float_shares is not None:
         label = _format_share_count(float_shares)
@@ -256,6 +266,13 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _dedupe(values: list[str]) -> list[str]:

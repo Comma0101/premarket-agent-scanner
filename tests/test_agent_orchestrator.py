@@ -21,6 +21,7 @@ def _candidate(
         "market_cap": 95_000_000,
         "gap_pct": 18.5,
         "gap_dollar": 0.74,
+        "gap_basis": "premarket",
         "volume": 8_500_000,
         "rel_volume": 6.2,
         "confidence": "OK",
@@ -122,8 +123,9 @@ def test_orchestrator_calls_small_cap_tool_and_buckets_candidates():
 
     as_dict = packet.to_dict()
     hot = as_dict["watchlist"]["primary_watch"][0]
+    assert hot["gap_basis"] == "premarket"
     assert hot["evidence_summary"] == (
-        "float=8.0M low; catalyst=PR: Announces contract; "
+        "gap_basis=premarket; float=8.0M low; catalyst=PR: Announces contract; "
         "filing_risk=offering; former_runner=yes"
     )
     assert "Use only the scanner packet" in as_dict["handoff_prompt"]

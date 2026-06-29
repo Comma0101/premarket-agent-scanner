@@ -82,6 +82,7 @@ def test_scan_small_caps_tool_returns_candidates():
                         market_cap=25_000_000,
                         gap_pct=12.0,
                         gap_dollar=0.72,
+                        gap_basis="premarket",
                         volume=2_000_000,
                         rel_volume=5.0,
                         confidence="OK",
@@ -113,6 +114,7 @@ def test_scan_small_caps_tool_returns_candidates():
     assert out["candidate_count"] == 1
     assert out["candidates"][0]["ticker"] == "HOT"
     assert out["candidates"][0]["grade"] == "A_WATCH"
+    assert out["candidates"][0]["gap_basis"] == "premarket"
     assert out["candidates"][0]["missing_fields"] == ["catalyst"]
     assert out["candidates"][0]["evidence"]["float_shares"] == 8_000_000
     assert out["candidates"][0]["evidence"]["is_low_float"] is True

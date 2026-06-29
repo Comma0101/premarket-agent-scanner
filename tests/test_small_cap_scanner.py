@@ -160,6 +160,7 @@ def _result(
     volume=2_000_000,
     rel_volume=5.0,
     confidence="OK",
+    gap_basis=None,
 ):
     return ScannerResult(
         ticker=ticker,
@@ -174,6 +175,7 @@ def _result(
         volume=volume,
         rel_volume=rel_volume,
         confidence=confidence,
+        gap_basis=gap_basis,
         notes=None,
         sources=["fake"],
         timestamp="2026-06-28T12:00:00Z",
@@ -292,6 +294,30 @@ def test_grade_strong_small_cap_candidate_is_a_watch():
     assert "high_rvol" in candidate.matched_signals
     assert "float" in candidate.missing_fields
     assert any("unknown" in note.lower() for note in candidate.risk_notes)
+
+
+def test_premarket_gap_basis_can_be_a_watch():
+    candidate = grade_small_cap_candidate(
+        _result(gap_basis="premarket"),
+        missing_fields=["float", "catalyst", "filings"],
+    )
+
+    assert candidate.grade == "A_WATCH"
+    assert candidate.gap_basis == "premarket"
+    assert "premarket_gap_basis" in candidate.matched_signals
+
+
+def test_last_trade_gap_basis_cannot_be_a_watch():
+    candidate = grade_small_cap_candidate(
+        _result(gap_basis="last_trade"),
+        missing_fields=["float", "catalyst", "filings"],
+    )
+
+    assert candidate.grade in {"B_WATCH", "C_WATCH", "REJECT"}
+    assert candidate.grade != "A_WATCH"
+    assert candidate.gap_basis == "last_trade"
+    assert "last_trade_gap_basis" in candidate.matched_signals
+    assert any("last_trade" in note for note in candidate.risk_notes)
 
 
 def test_strong_high_rvol_candidate_with_thin_volume_is_not_a_watch():

@@ -214,6 +214,20 @@ def grade_small_cap_candidate(
         score += 15
         matched.append("gap_up")
 
+    if result.gap_basis == "premarket":
+        matched.append("premarket_gap_basis")
+    elif result.gap_basis == "last_trade":
+        matched.append("last_trade_gap_basis")
+        risk_notes.append(
+            "gap_basis=last_trade; last regular/last trade, not a premarket quote."
+        )
+    elif result.gap_basis is None:
+        risk_notes.append("gap_basis unknown; not a confirmed premarket move.")
+    else:
+        risk_notes.append(
+            f"gap_basis={result.gap_basis}; not a confirmed premarket move."
+        )
+
     if result.rel_volume is not None and result.rel_volume >= 3:
         score += 25
         matched.append("high_rvol")
@@ -245,6 +259,7 @@ def grade_small_cap_candidate(
         score,
         provided_missing_fields,
         has_absolute_volume_floor=has_absolute_volume_floor,
+        gap_basis=result.gap_basis,
     )
     return _candidate(result, score, grade, matched, provided_missing_fields, risk_notes)
 
@@ -261,8 +276,11 @@ def _grade(
     missing_fields: list[str],
     *,
     has_absolute_volume_floor: bool,
+    gap_basis: str | None,
 ) -> SmallCapGrade:
     if score >= 80 and len(missing_fields) <= 6 and has_absolute_volume_floor:
+        if gap_basis is not None and gap_basis != "premarket":
+            return "B_WATCH"
         return "A_WATCH"
     if score >= 60:
         return "B_WATCH"
@@ -290,6 +308,7 @@ def _candidate(
         confidence=result.confidence,
         score=score,
         grade=grade,
+        gap_basis=result.gap_basis,
         matched_signals=matched,
         missing_fields=missing_fields,
         risk_notes=risk_notes,

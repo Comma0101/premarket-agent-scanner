@@ -259,6 +259,7 @@ class SmallCapCandidate:
     confidence: Confidence
     score: int
     grade: SmallCapGrade
+    gap_basis: str | None = None
     matched_signals: list[str] = field(default_factory=list)
     missing_fields: list[str] = field(default_factory=list)
     risk_notes: list[str] = field(default_factory=list)
