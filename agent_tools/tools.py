@@ -552,9 +552,15 @@ def get_trader_context(
         return {"error": "ticker is required."}
 
     if service is None:
+        bar_provider = None
+        if include_intraday or include_daily:
+            from providers.alpaca_provider import AlpacaProvider
+
+            bar_provider = AlpacaProvider()
+
         from services.trader_context_service import TraderContextService
 
-        service = TraderContextService()
+        service = TraderContextService(bar_provider=bar_provider)
 
     try:
         return service.build_context(

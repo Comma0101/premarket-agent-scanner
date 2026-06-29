@@ -426,6 +426,41 @@ def test_get_trader_context_tool_requires_ticker():
     assert "error" in out
 
 
+def test_get_trader_context_tool_wires_bar_provider_for_technicals(monkeypatch):
+    from providers import alpaca_provider as alpaca_module
+    from services import trader_context_service as context_module
+
+    calls = {"alpaca": 0, "context": 0}
+
+    class FakeAlpacaProvider:
+        def __init__(self):
+            calls["alpaca"] += 1
+
+    class FakeTraderContextService:
+        def __init__(self, bar_provider=None):
+            calls["context"] += 1
+            assert isinstance(bar_provider, FakeAlpacaProvider)
+
+        def build_context(self, **kwargs):
+            return {
+                "ticker": kwargs["ticker"],
+                "technicals": {"intraday": None, "daily": None},
+                "missing_fields": ["intraday_bars", "daily_bars"],
+            }
+
+    monkeypatch.setattr(alpaca_module, "AlpacaProvider", FakeAlpacaProvider)
+    monkeypatch.setattr(context_module, "TraderContextService", FakeTraderContextService)
+
+    out = tools.get_trader_context(
+        ticker="HOT",
+        include_intraday=True,
+        include_daily=True,
+    )
+
+    assert calls == {"alpaca": 1, "context": 1}
+    assert out["ticker"] == "HOT"
+
+
 def test_get_ticker_snapshot_uses_configured_providers(monkeypatch):
     # Regression: the snapshot tool must build its service the same way the scan
     # path does (with_configured_providers), so both agree on the number. A bare
