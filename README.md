@@ -43,8 +43,8 @@ Implemented:
 - Gap scanner service with market-cap, gap, direction, volume, and
   relative-volume (RVOL) filters, plus named cap tiers (nano/micro/small/mid/
   large/mega) for small-cap vs large-cap gapper scans.
-- CLI: `list_universes`, `scan_premarket`, `refresh_profiles`, `scan_small_caps`,
-  and `run_agent`.
+- CLI: `list_universes`, `scan_premarket`, `refresh_profiles`, `refresh_news`,
+  `scan_small_caps`, and `run_agent`.
 - Agent-callable JSON tool layer (`agent_tools`): `scan_premarket`,
   `scan_small_caps`, `list_universes`, and `get_ticker_snapshot`, with standard
   tool-use schemas and a dispatcher that can log to `agent_queries`.
@@ -64,7 +64,8 @@ Pending:
 - Snapshot history / staleness reporting commands.
 - Paper watchlist + journaling tools for the desk agent (track flagged names
   through the session).
-- Catalyst/news, float, and intraday-level data tools to deepen setup judgment.
+- Short-interest, borrow-cost, and intraday-level data tools to deepen setup
+  judgment.
 
 ## Agent Layer (MCP)
 
@@ -178,6 +179,12 @@ Refresh company profiles:
 python -m cli.refresh_profiles --universe AI_WAVE_3_EQUIPMENT
 ```
 
+Refresh cached catalyst/news evidence from the configured RSS provider:
+
+```bash
+python -m cli.refresh_news --tickers HOT,COOL
+```
+
 Run scanner:
 
 ```bash
@@ -215,8 +222,11 @@ the output with evidence when available.
 
 Evidence currently includes float and shares outstanding from profile
 providers, float rotation (volume divided by float), exchange/listing context,
-recent SEC filing metadata, cached catalyst/news records, and local
-former-runner history. Missing evidence is still shown as unknown rather than
+recent SEC filing metadata, cached or freshly fetched catalyst/news records,
+and local former-runner history. The default catalyst provider uses verified RSS
+feeds from PRNewswire, GlobeNewswire, and Business Wire as discovery sources,
+then caches matched events in SQLite with `hard`, `soft`, or `unknown`
+catalyst-quality labels. Missing evidence is still shown as unknown rather than
 inferred. Short-interest and borrow-cost context remain unsupported in v1.
 
 Example:
@@ -268,6 +278,8 @@ This project uses free sources with clear limitations:
 - yfinance: personal/research-grade quote and profile fallback.
 - Alpaca Free: IEX-only structured validation, not full-market SIP data.
 - FMP Free: company profile and market cap, with daily request limits.
+- PRNewswire, GlobeNewswire, and Business Wire RSS: catalyst/news discovery for
+  explicit ticker matches; not a complete news tape.
 
 The agent layer must not invent numbers. Prices, market caps, gaps, volume, and confidence labels must come from the data layer.
 
