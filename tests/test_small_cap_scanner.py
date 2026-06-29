@@ -5,7 +5,16 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from app.models import ScannerResult, ScanRunOutput, SmallCapEvidence
+from app.models import (
+    CatalystEvent,
+    FilingEvent,
+    FormerRunnerEvent,
+    ScannerResult,
+    ScanRunOutput,
+    SmallCapCandidate,
+    SmallCapEvidence,
+)
+from cli.scan_small_caps import _format_evidence_float
 from services.scanner_preset_service import PresetService
 from services.small_cap_scanner_service import (
     SmallCapScannerService,
@@ -17,6 +26,80 @@ def test_scan_small_caps_cli_imports():
     import cli.scan_small_caps as module
 
     assert module.app is not None
+
+
+def test_scan_small_caps_cli_formats_evidence_float():
+    evidence = SmallCapEvidence(
+        ticker="HOT",
+        float_shares=8_000_000,
+        is_low_float=True,
+    )
+
+    assert _format_evidence_float(evidence) == "8.0M low"
+    assert _format_evidence_float(None) == "-"
+
+
+def test_scan_small_caps_cli_uses_evidence_missing_fields_when_available():
+    import cli.scan_small_caps as module
+
+    candidate = SmallCapCandidate(
+        ticker="HOT",
+        name=None,
+        market_cap=25_000_000,
+        gap_pct=12.0,
+        gap_dollar=1.2,
+        volume=2_000_000,
+        rel_volume=5.0,
+        confidence="OK",
+        score=90,
+        grade="A_WATCH",
+        missing_fields=["float", "catalyst"],
+        evidence=SmallCapEvidence(ticker="HOT", missing_fields=["catalyst"]),
+    )
+
+    assert module._format_candidate_missing_fields(candidate) == "catalyst"
+
+    candidate.evidence = None
+
+    assert module._format_candidate_missing_fields(candidate) == "float, catalyst"
+
+
+def test_scan_small_caps_cli_formats_compact_evidence_summary():
+    import cli.scan_small_caps as module
+
+    evidence = SmallCapEvidence(
+        ticker="HOT",
+        float_shares=8_000_000,
+        is_low_float=True,
+        catalysts=[
+            CatalystEvent(
+                ticker="HOT",
+                headline="Deal",
+                published_at="2026-06-28T12:00:00Z",
+                source="PR",
+            )
+        ],
+        filings=[
+            FilingEvent(
+                ticker="HOT",
+                form_type="S-1",
+                filed_at="2026-06-28",
+                accession_number="0000000000-26-000001",
+                risk_tags=["offering"],
+            )
+        ],
+        former_runner=FormerRunnerEvent(ticker="HOT", event_date="2026-06-01"),
+    )
+
+    summary = module._format_evidence_summary(evidence)
+
+    assert len(summary) <= 32
+    assert "8.0M" in summary
+    assert "cat" in summary
+    assert "offering" in summary
+    assert "former" in summary or "prev" in summary
+    assert module._format_evidence_summary(SmallCapEvidence(ticker="COLD")) == "-"
+    assert module._format_evidence_summary(None) == "-"
 
 
 def test_scan_small_caps_cli_reports_invalid_preset_cleanly():
