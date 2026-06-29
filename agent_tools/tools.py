@@ -199,12 +199,14 @@ def scan_small_caps(
     watchlist: str | None = None,
     tickers: str | None = None,
     all_universes: bool = False,
+    market: str | None = None,
+    market_limit: int | None = None,
     service: Any | None = None,
 ) -> dict[str, Any]:
     """Run the small-cap scanner and return JSON-safe candidates."""
-    if not any([universe, watchlist, tickers, all_universes]):
+    if not any([universe, watchlist, tickers, all_universes, market]):
         return {
-            "error": "Provide at least one of: universe, watchlist, tickers, or all_universes."
+            "error": "Provide at least one of: universe, watchlist, tickers, market, or all_universes."
         }
 
     scanner = service
@@ -220,6 +222,8 @@ def scan_small_caps(
             watchlist=watchlist,
             tickers=tickers,
             all_universes=all_universes,
+            market=market,
+            market_limit=market_limit,
         )
     except KeyError as exc:
         return {"error": str(exc)}

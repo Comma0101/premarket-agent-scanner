@@ -37,6 +37,7 @@ class SmallCapScannerService:
         scanner_service: ScannerService | None = None,
         preset_service: PresetService | None = None,
         evidence_service: SmallCapEvidenceEnricher | None = None,
+        market_universe_provider: object | None = None,
     ) -> None:
         self.scanner_service = scanner_service or ScannerService()
         self.preset_service = preset_service or PresetService()
@@ -45,6 +46,7 @@ class SmallCapScannerService:
             if evidence_service is not None
             else SmallCapEvidenceService()
         )
+        self.market_universe_provider = market_universe_provider
 
     def scan(
         self,
@@ -54,11 +56,31 @@ class SmallCapScannerService:
         watchlist: str | list[str] | None = None,
         tickers: list[str] | str | None = None,
         all_universes: bool = False,
+        market: str | None = None,
+        market_limit: int | None = None,
     ) -> SmallCapScanOutput:
         preset = self.preset_service.get_preset(preset_name)
         run_ids: list[str] = []
         notes = list(preset.notes)
         candidates_by_ticker: dict[str, SmallCapCandidate] = {}
+        if market:
+            if any([universe, watchlist, tickers, all_universes]):
+                raise ValueError("Use market by itself; do not combine it with universe/watchlist/tickers/all.")
+            market_universe = self._market_universe_provider().list_symbols(market)
+            tickers = market_universe.symbols
+            if market_limit is not None:
+                limit = max(0, int(market_limit))
+                tickers = tickers[:limit]
+            notes.insert(
+                0,
+                (
+                    f"Market universe {market} resolved {len(market_universe.symbols)} "
+                    f"symbol(s) from {market_universe.source}."
+                ),
+            )
+            notes[1:1] = list(market_universe.notes)
+            if market_limit is not None:
+                notes.insert(1, f"Limited market universe to {len(tickers)} symbol(s) for testing.")
 
         for cap_tier in preset.cap_tiers:
             filters = make_scan_filters(
@@ -105,6 +127,14 @@ class SmallCapScannerService:
             candidates=candidates,
             notes=notes,
         )
+
+    def _market_universe_provider(self):
+        if self.market_universe_provider is not None:
+            return self.market_universe_provider
+        from providers.market_universe_provider import MarketUniverseProvider
+
+        self.market_universe_provider = MarketUniverseProvider()
+        return self.market_universe_provider
 
 
 def grade_small_cap_candidate(

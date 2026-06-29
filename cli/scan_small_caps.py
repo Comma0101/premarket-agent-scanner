@@ -21,11 +21,21 @@ def main(
     universe: str = typer.Option(None, "--universe", "-u", help="Universe name(s)."),
     watchlist: str = typer.Option(None, "--watchlist", "-w", help="Watchlist name(s)."),
     tickers: str = typer.Option(None, "--tickers", "-t", help="Ad-hoc tickers, comma-separated."),
+    market: str = typer.Option(
+        None,
+        "--market",
+        help="Whole-market source, e.g. us-listed.",
+    ),
+    market_limit: int = typer.Option(
+        None,
+        "--market-limit",
+        help="Limit market symbols for smoke tests.",
+    ),
     all_universes: bool = typer.Option(False, "--all", help="Scan every defined universe."),
 ) -> None:
-    if not any([universe, watchlist, tickers, all_universes]):
+    if not any([universe, watchlist, tickers, market, all_universes]):
         raise typer.BadParameter(
-            "Pick a selection: --universe, --watchlist, --tickers, or --all."
+            "Pick a selection: --universe, --watchlist, --tickers, --market, or --all."
         )
 
     try:
@@ -34,6 +44,8 @@ def main(
             universe=universe,
             watchlist=watchlist,
             tickers=tickers,
+            market=market,
+            market_limit=market_limit,
             all_universes=all_universes,
         )
     except (KeyError, ValueError) as exc:

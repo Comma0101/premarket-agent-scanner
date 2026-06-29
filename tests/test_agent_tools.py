@@ -119,6 +119,32 @@ def test_scan_small_caps_tool_returns_candidates():
     assert "catalyst" in out["candidates"][0]["evidence"]["missing_fields"]
 
 
+def test_scan_small_caps_tool_accepts_market_selection():
+    from app.models import SmallCapScanOutput
+
+    class FakeSmallCapService:
+        def scan(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 25
+            return SmallCapScanOutput(
+                preset=kwargs["preset_name"],
+                run_ids=[],
+                candidate_count=0,
+                candidates=[],
+                notes=["market universe us-listed"],
+            )
+
+    out = tools.scan_small_caps(
+        market="us-listed",
+        market_limit=25,
+        preset_name="sykes_small_cap_v0",
+        service=FakeSmallCapService(),
+    )
+
+    assert out["candidate_count"] == 0
+    assert out["notes"] == ["market universe us-listed"]
+
+
 def test_list_universes_tool_shape():
     out = tools.list_universes(service=UniverseService())
     assert "MAG7" in out["universes"]
@@ -150,3 +176,7 @@ def test_tool_definitions_are_well_formed():
         assert tool["description"]
         assert tool["input_schema"]["type"] == "object"
         assert "properties" in tool["input_schema"]
+
+    small_cap_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "scan_small_caps")
+    assert "market" in small_cap_tool["input_schema"]["properties"]
+    assert "market_limit" in small_cap_tool["input_schema"]["properties"]

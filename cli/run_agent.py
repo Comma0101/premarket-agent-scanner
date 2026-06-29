@@ -17,6 +17,12 @@ def main(
     tickers: str = typer.Option(None, "--tickers", "-t", help="Ad-hoc tickers, comma-separated."),
     universe: str = typer.Option(None, "--universe", "-u", help="Universe name(s)."),
     watchlist: str = typer.Option(None, "--watchlist", "-w", help="Watchlist name(s)."),
+    market: str = typer.Option(None, "--market", help="Whole-market source, e.g. us-listed."),
+    market_limit: int = typer.Option(
+        None,
+        "--market-limit",
+        help="Limit market symbols for smoke tests.",
+    ),
     all_universes: bool = typer.Option(False, "--all", help="Scan every defined universe."),
     preset_name: str = typer.Option(
         "sykes_small_cap_v0",
@@ -25,9 +31,9 @@ def main(
     ),
     json_output: bool = typer.Option(False, "--json", help="Print the agent packet as JSON."),
 ) -> None:
-    if not any([tickers, universe, watchlist, all_universes]):
+    if not any([tickers, universe, watchlist, market, all_universes]):
         raise typer.BadParameter(
-            "Pick a selection: --tickers, --universe, --watchlist, or --all."
+            "Pick a selection: --tickers, --universe, --watchlist, --market, or --all."
         )
 
     packet = TradingAgentOrchestrator().run_sykes_small_cap_watchlist(
@@ -35,6 +41,8 @@ def main(
         tickers=tickers,
         universe=universe,
         watchlist=watchlist,
+        market=market,
+        market_limit=market_limit,
         all_universes=all_universes,
         user_query="run sykes-style small-cap watchlist agent",
     )

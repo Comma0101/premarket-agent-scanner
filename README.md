@@ -80,6 +80,18 @@ Run the Sykes-style small-cap watchlist orchestrator:
 python -m cli.run_agent --tickers IONQ,SOUN --json
 ```
 
+Run the same workflow against a filtered US-listed market universe:
+
+```bash
+python -m cli.run_agent --market us-listed --json
+```
+
+For a quick live smoke test, limit the number of market symbols:
+
+```bash
+python -m cli.run_agent --market us-listed --market-limit 25 --json
+```
+
 The default workflow is `sykes_small_cap_watchlist`. It does not impersonate
 Timothy Sykes, does not place orders, and does not produce buy/sell advice. It
 packages scanner evidence so the driving agent can communicate grounded
@@ -171,6 +183,27 @@ Example:
 ```bash
 python -m cli.scan_small_caps --all --preset sykes_small_cap_v0
 ```
+
+Whole-market mode:
+
+```bash
+python -m cli.scan_small_caps --market us-listed --preset sykes_small_cap_v0
+```
+
+Smoke-test mode:
+
+```bash
+python -m cli.scan_small_caps --market us-listed --market-limit 25
+```
+
+`--market us-listed` uses Alpaca's active US equity assets when Alpaca keys are
+configured. Without Alpaca keys, it falls back to public Nasdaq Trader symbol
+files and filters out ETFs, test issues, warrants, units, rights, preferreds,
+funds, trusts, notes, and other non-common-stock-like symbols before applying
+the small-cap scanner filters. Class-share and preferred-style symbols with
+structural markers such as `.` or `$` are also filtered out because the current
+quote path does not normalize them. Yahoo/yfinance remains the quote/profile
+source; it is not used as the official market symbol master.
 
 The output is watchlist context only, not buy/sell advice.
 

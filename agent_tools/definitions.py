@@ -119,6 +119,22 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Explicit tickers, comma-separated.",
                 },
+                "market": {
+                    "type": "string",
+                    "enum": ["us-listed"],
+                    "description": (
+                        "Whole-market source to scan before small-cap filters. "
+                        "Use 'us-listed' for the filtered US-listed common-stock universe."
+                    ),
+                },
+                "market_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Optional cap on the number of market symbols to scan. "
+                        "Use only for smoke tests; omit for the full market."
+                    ),
+                },
                 "all_universes": {
                     "type": "boolean",
                     "description": "Scan every defined universe. Defaults to false.",

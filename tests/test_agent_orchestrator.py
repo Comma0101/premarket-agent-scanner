@@ -129,6 +129,38 @@ def test_orchestrator_calls_small_cap_tool_and_buckets_candidates():
     assert "Use only the scanner packet" in as_dict["handoff_prompt"]
 
 
+def test_orchestrator_can_run_market_scan():
+    calls = []
+
+    def fake_dispatch(name, tool_input, *, user_query=None, db_path=None):
+        calls.append((name, tool_input))
+        return {
+            "preset": "sykes_small_cap_v0",
+            "run_ids": [],
+            "candidate_count": 0,
+            "candidates": [],
+            "notes": ["Market universe us-listed resolved 4000 symbol(s)."],
+        }
+
+    packet = TradingAgentOrchestrator(dispatcher=fake_dispatch).run_sykes_small_cap_watchlist(
+        market="us-listed",
+        market_limit=100,
+    )
+
+    assert calls == [
+        (
+            "scan_small_caps",
+            {
+                "preset_name": "sykes_small_cap_v0",
+                "market": "us-listed",
+                "market_limit": 100,
+            },
+        )
+    ]
+    assert packet.status == "OK"
+    assert packet.notes == ["Market universe us-listed resolved 4000 symbol(s)."]
+
+
 def test_orchestrator_returns_error_packet_for_tool_error():
     def fake_dispatch(name, tool_input, *, user_query=None, db_path=None):
         return {"error": "scan_small_caps failed: provider offline"}
@@ -160,7 +192,7 @@ def test_orchestrator_requires_selection_before_calling_tool():
     assert packet.status == "ERROR"
     assert packet.tool_calls == []
     assert packet.warnings == [
-        "Pick a selection: tickers, universe, watchlist, or all_universes."
+        "Pick a selection: tickers, universe, watchlist, market, or all_universes."
     ]
 
 
@@ -169,7 +201,8 @@ def test_run_agent_cli_json_output(monkeypatch):
 
     class FakeOrchestrator:
         def run_sykes_small_cap_watchlist(self, **kwargs):
-            assert kwargs["tickers"] == "HOT"
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 25
             return AgentRunPacket(
                 agent_name="sykes_style_small_cap_agent",
                 strategy="sykes_small_cap_watchlist",
@@ -188,7 +221,10 @@ def test_run_agent_cli_json_output(monkeypatch):
 
     monkeypatch.setattr(run_agent, "TradingAgentOrchestrator", FakeOrchestrator)
 
-    result = CliRunner().invoke(run_agent.app, ["--tickers", "HOT", "--json"])
+    result = CliRunner().invoke(
+        run_agent.app,
+        ["--market", "us-listed", "--market-limit", "25", "--json"],
+    )
 
     assert result.exit_code == 0
     data = json.loads(result.output)

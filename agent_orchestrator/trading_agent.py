@@ -23,6 +23,7 @@ GUARDRAILS = [
     "Do not claim to be Timothy Sykes; this is a Sykes-style small-cap watchlist agent built from public criteria.",
 ]
 
+
 class TradingAgentOrchestrator:
     def __init__(self, dispatcher: Dispatcher | None = None) -> None:
         self.dispatcher = dispatcher or dispatch
@@ -34,6 +35,8 @@ class TradingAgentOrchestrator:
         universe: str | None = None,
         watchlist: str | None = None,
         tickers: str | None = None,
+        market: str | None = None,
+        market_limit: int | None = None,
         all_universes: bool = False,
         user_query: str | None = None,
         db_path: str | None = None,
@@ -42,14 +45,17 @@ class TradingAgentOrchestrator:
             universe=universe,
             watchlist=watchlist,
             tickers=tickers,
+            market=market,
             all_universes=all_universes,
         )
         if not selection:
             return _error_packet(
-                "Pick a selection: tickers, universe, watchlist, or all_universes."
+                "Pick a selection: tickers, universe, watchlist, market, or all_universes."
             )
 
         tool_input = {"preset_name": preset_name, **selection}
+        if market_limit is not None:
+            tool_input["market_limit"] = market_limit
         result = self.dispatcher(
             "scan_small_caps",
             tool_input,
@@ -111,6 +117,7 @@ def _selection_input(
     universe: str | None,
     watchlist: str | None,
     tickers: str | None,
+    market: str | None,
     all_universes: bool,
 ) -> dict[str, Any]:
     selection: dict[str, Any] = {}
@@ -120,6 +127,8 @@ def _selection_input(
         selection["watchlist"] = watchlist
     if tickers:
         selection["tickers"] = tickers
+    if market:
+        selection["market"] = market
     if all_universes:
         selection["all_universes"] = True
     return selection
