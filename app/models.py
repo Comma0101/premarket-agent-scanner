@@ -17,6 +17,7 @@ Confidence = Literal[
 ]
 
 Direction = Literal["up", "down", "both"]
+SmallCapGrade = Literal["A_WATCH", "B_WATCH", "C_WATCH", "REJECT"]
 
 
 def utc_now_iso() -> str:
@@ -109,6 +110,19 @@ class ScanFilters:
     include_low_confidence: bool = True
 
 
+@dataclass
+class SmallCapScannerPreset:
+    name: str
+    cap_tiers: list[str]
+    direction: Direction = "up"
+    min_gap_abs: float = 5.0
+    min_volume: float | None = None
+    min_rel_volume: float | None = 2.0
+    include_low_confidence: bool = False
+    missing_fields: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
 # Market-cap tiers (USD). Upper bound is exclusive; None means no upper bound.
 CAP_TIERS: dict[str, tuple[float, float | None]] = {
     "nano": (0, 50e6),
@@ -182,6 +196,84 @@ class ScannerResult:
     sources: list[str] = field(default_factory=list)
     timestamp: str | None = None
     created_at: str = field(default_factory=utc_now_iso)
+
+
+@dataclass
+class FilingEvent:
+    ticker: str
+    form_type: str
+    filed_at: str
+    accession_number: str
+    description: str | None = None
+    source_url: str | None = None
+    risk_tags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CatalystEvent:
+    ticker: str
+    headline: str
+    published_at: str | None
+    source: str
+    url: str | None = None
+    summary: str | None = None
+    confidence: str = "UNKNOWN"
+
+
+@dataclass
+class FormerRunnerEvent:
+    ticker: str
+    event_date: str
+    max_gap_pct: float | None = None
+    max_volume: float | None = None
+    source_run_id: str | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SmallCapEvidence:
+    ticker: str
+    float_shares: float | None = None
+    shares_outstanding: float | None = None
+    float_source: str | None = None
+    exchange: str | None = None
+    is_low_float: bool | None = None
+    filings: list[FilingEvent] = field(default_factory=list)
+    catalysts: list[CatalystEvent] = field(default_factory=list)
+    former_runner: FormerRunnerEvent | None = None
+    missing_fields: list[str] = field(default_factory=list)
+    risk_notes: list[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+
+@dataclass
+class SmallCapCandidate:
+    ticker: str
+    name: str | None
+    market_cap: float | None
+    gap_pct: float | None
+    gap_dollar: float | None
+    volume: float | None
+    rel_volume: float | None
+    confidence: Confidence
+    score: int
+    grade: SmallCapGrade
+    matched_signals: list[str] = field(default_factory=list)
+    missing_fields: list[str] = field(default_factory=list)
+    risk_notes: list[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    evidence: SmallCapEvidence | None = None
+    timestamp: str | None = None
+
+
+@dataclass
+class SmallCapScanOutput:
+    preset: str
+    run_ids: list[str]
+    candidate_count: int
+    candidates: list[SmallCapCandidate]
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass

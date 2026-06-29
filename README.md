@@ -19,7 +19,7 @@ The scanner is a data/query layer first. It is not an auto-trading system and do
 - Market-cap and company-profile caching.
 - Premarket gap calculation.
 - Data-confidence labels for missing, stale, low-confidence, and conflicting data.
-- CLI and agent-callable JSON tool layer.
+- CLI, agent-callable JSON tool layer, and deterministic agent orchestrator.
 
 ## Current Status
 
@@ -43,15 +43,19 @@ Implemented:
 - Gap scanner service with market-cap, gap, direction, volume, and
   relative-volume (RVOL) filters, plus named cap tiers (nano/micro/small/mid/
   large/mega) for small-cap vs large-cap gapper scans.
-- CLI: `list_universes`, `scan_premarket`, and `refresh_profiles`.
+- CLI: `list_universes`, `scan_premarket`, `refresh_profiles`, `scan_small_caps`,
+  and `run_agent`.
 - Agent-callable JSON tool layer (`agent_tools`): `scan_premarket`,
-  `list_universes`, and `get_ticker_snapshot`, with standard tool-use schemas
-  and a dispatcher that can log to `agent_queries`.
+  `scan_small_caps`, `list_universes`, and `get_ticker_snapshot`, with standard
+  tool-use schemas and a dispatcher that can log to `agent_queries`.
 - MCP server (`mcp_server`) exposing those tools over the Model Context Protocol
   for Claude Code / opencode / codex, plus a `premarket-desk` analyst persona and
   pluggable `trader_profiles/`.
+- Agent orchestrator (`agent_orchestrator`) that turns scanner output into a
+  grounded Sykes-style small-cap watchlist packet for Codex, Claude, opencode,
+  or another external driver.
 - Test suite covering gap math, filtering, sorting, confidence labelling, the
-  JSON tools, and the MCP transport (all offline).
+  JSON tools, dispatcher behavior, and the MCP transport (all offline).
 - Default AI-related universes and personal watchlist example.
 
 Pending:
@@ -79,6 +83,7 @@ python -m mcp_server            # stdio MCP server exposing the scanner tools
 the same command. The tools are:
 
 - `scan_premarket` — gap scan over a universe/watchlist/tickers with filters.
+- `scan_small_caps` — Sykes-style small-cap watchlist scanner with evidence.
 - `list_universes` — list defined universes and watchlists.
 - `get_ticker_snapshot` — full snapshot + computed gap for one ticker.
 
@@ -95,6 +100,43 @@ data-confidence labels, and writes a morning brief — never inventing a number.
 Its *style* is pluggable: it loads a trader profile from `trader_profiles/`
 (`default.md` out of the box; copy `TEMPLATE.md` to distill a specific trader's
 playbook into concrete scan filters and a grading rubric).
+
+## Agent Orchestrator
+
+The repo exposes JSON-safe tools in `agent_tools` for an external agent
+(Codex, Claude, opencode, or another driver) to call directly. It also includes
+a deterministic orchestrator in `agent_orchestrator` that calls those tools and
+builds an agent handoff packet. The packet contains the tool call, watchlist
+buckets, evidence summaries, missing-data warnings, safety guardrails, and a
+handoff prompt. There is still no built-in LLM API client; the external agent
+uses the packet.
+
+Every price, gap, market cap, volume, and confidence label comes from the tool
+layer, which is a thin wrapper over the scanner. The JSON tools work and are
+tested without any LLM API key.
+
+Run the Sykes-style small-cap watchlist orchestrator:
+
+```bash
+python -m cli.run_agent --tickers IONQ,SOUN --json
+```
+
+Run the same workflow against a filtered US-listed market universe:
+
+```bash
+python -m cli.run_agent --market us-listed --json
+```
+
+For a quick live smoke test, limit the number of market symbols:
+
+```bash
+python -m cli.run_agent --market us-listed --market-limit 25 --json
+```
+
+The default workflow is `sykes_small_cap_watchlist`. It does not impersonate
+Timothy Sykes, does not place orders, and does not produce buy/sell advice. It
+packages scanner evidence so the driving agent can communicate grounded
+watchlist context.
 
 Note: Yahoo Finance must be reachable for the yfinance path. Some sandboxed or
 policy-restricted networks block it; run locally for live premarket data.
@@ -164,6 +206,48 @@ relative volume (current volume ÷ average daily volume) — a key gapper-qualit
 signal, especially for small caps. Small-cap scanning needs small-cap tickers in
 a universe or watchlist; add them in `data/universes.yaml`.
 
+## Small-Cap Discovery Scanner
+
+`python -m cli.scan_small_caps` runs a listed small-cap discovery scan using
+named presets such as `sykes_small_cap_v0`. The scanner ranks watchlist
+candidates by gap, volume, RVOL, cap fit, and data confidence, while enriching
+the output with evidence when available.
+
+Evidence currently includes float and shares outstanding from profile
+providers, exchange/listing context, recent SEC filing metadata, cached
+catalyst/news records, and local former-runner history. Missing evidence is
+still shown as unknown rather than inferred. Short-interest and borrow-cost
+context remain unsupported in v1.
+
+Example:
+
+```bash
+python -m cli.scan_small_caps --all --preset sykes_small_cap_v0
+```
+
+Whole-market mode:
+
+```bash
+python -m cli.scan_small_caps --market us-listed --preset sykes_small_cap_v0
+```
+
+Smoke-test mode:
+
+```bash
+python -m cli.scan_small_caps --market us-listed --market-limit 25
+```
+
+`--market us-listed` uses Alpaca's active US equity assets when Alpaca keys are
+configured. Without Alpaca keys, it falls back to public Nasdaq Trader symbol
+files and filters out ETFs, test issues, warrants, units, rights, preferreds,
+funds, trusts, notes, and other non-common-stock-like symbols before applying
+the small-cap scanner filters. Class-share and preferred-style symbols with
+structural markers such as `.` or `$` are also filtered out because the current
+quote path does not normalize them. Yahoo/yfinance remains the quote/profile
+source; it is not used as the official market symbol master.
+
+The output is watchlist context only, not buy/sell advice.
+
 List universes:
 
 ```bash
@@ -204,7 +288,8 @@ User watchlists live in:
 data/watchlists.yaml
 ```
 
-V1 intentionally scans selected universes only. It does not attempt a full-market scan.
+V1 supports selected universes/watchlists and the filtered `--market us-listed`
+common-stock universe.
 
 ## Safety
 

@@ -1,0 +1,21 @@
+sykes_small_cap_v0:
+  cap_tiers:
+    - nano
+    - micro
+    - small
+  direction: up
+  min_gap_abs: 5.0
+  min_volume: 500000
+  min_rel_volume: 2.0
+  include_low_confidence: false
+  missing_fields:
+    - float
+    - catalyst
+    - filings
+    - former_runner
+    - liquidity
+    - short_interest
+  notes:
+    - "Listed small-cap discovery preset."
+    - "Thresholds are pragmatic defaults, not source-explicit Timothy Sykes criteria."
+    - "Unsupported fields must remain unknown, not inferred."

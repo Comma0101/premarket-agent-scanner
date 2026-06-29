@@ -34,7 +34,15 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["app", "cli", "services", "providers", "agent_tools", "mcp_server"]
+packages = [
+    "app",
+    "cli",
+    "services",
+    "providers",
+    "agent_tools",
+    "mcp_server",
+    "agent_orchestrator",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

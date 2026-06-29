@@ -91,6 +91,59 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "scan_small_caps",
+        "description": (
+            "Run the small-cap watchlist scanner over a universe, watchlist, or "
+            "explicit tickers and return grounded candidate data. This is a "
+            "small-cap watchlist scanner, not a trade recommendation engine; do "
+            "not present candidates as execution advice."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "preset_name": {
+                    "type": "string",
+                    "description": (
+                        "Small-cap scanner preset name. Defaults to sykes_small_cap_v0."
+                    ),
+                },
+                "universe": {
+                    "type": "string",
+                    "description": "Universe name(s), comma-separated.",
+                },
+                "watchlist": {
+                    "type": "string",
+                    "description": "Watchlist name(s), comma-separated.",
+                },
+                "tickers": {
+                    "type": "string",
+                    "description": "Explicit tickers, comma-separated.",
+                },
+                "market": {
+                    "type": "string",
+                    "enum": ["us-listed"],
+                    "description": (
+                        "Whole-market source to scan before small-cap filters. "
+                        "Use 'us-listed' for the filtered US-listed common-stock universe."
+                    ),
+                },
+                "market_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Optional cap on the number of market symbols to scan. "
+                        "Use only for smoke tests; omit for the full market."
+                    ),
+                },
+                "all_universes": {
+                    "type": "boolean",
+                    "description": "Scan every defined universe. Defaults to false.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "list_universes",
         "description": (
             "List the defined universes and watchlists with their member tickers. "
@@ -126,6 +179,7 @@ TOOLS: list[dict[str, Any]] = [
 
 _DISPATCH: dict[str, Callable[..., dict[str, Any]]] = {
     "scan_premarket": tools.scan_premarket,
+    "scan_small_caps": tools.scan_small_caps,
     "list_universes": tools.list_universes,
     "get_ticker_snapshot": tools.get_ticker_snapshot,
 }
@@ -165,7 +219,8 @@ def _log(
     try:
         from app.db import get_connection, log_agent_query
 
-        summary = result.get("error") or f"{result.get('result_count', '')} result(s)".strip()
+        count = result.get("result_count", result.get("candidate_count", ""))
+        summary = result.get("error") or f"{count} result(s)".strip()
         with get_connection(db_path) as conn:
             log_agent_query(
                 conn,
