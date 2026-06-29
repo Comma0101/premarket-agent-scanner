@@ -38,6 +38,37 @@ def build_breitstein_ticker_explanation(
     }
 
 
+def build_trader_context_explanation(context: dict[str, Any]) -> dict[str, Any]:
+    snapshot = _as_dict(context.get("snapshot"))
+    evidence = _as_dict(context.get("evidence"))
+    technicals = _as_dict(context.get("technicals"))
+    trader = str(context.get("trader_profile") or "default")
+    ticker = str(context.get("ticker") or snapshot.get("ticker") or "").upper()
+    missing_fields = [str(field) for field in context.get("missing_fields") or []]
+    setup_stack = _context_setup_stack(
+        trader=trader,
+        snapshot=snapshot,
+        evidence=evidence,
+        technicals=technicals,
+    )
+
+    return {
+        "ticker": ticker,
+        "trader": trader,
+        "lens": _context_lens(trader),
+        "verdict": _context_verdict(snapshot),
+        "moment_state": _context_moment_state(snapshot),
+        "data_card": _data_card(snapshot),
+        "setup_stack": setup_stack,
+        "moment_path": _context_moment_path(snapshot, evidence, technicals),
+        "what_we_lack": missing_fields,
+        "next_needed": _context_next_needed(snapshot, missing_fields),
+        "context": context,
+        "notes": list(context.get("notes") or []),
+        "disclaimer": DISCLAIMER,
+    }
+
+
 def _data_card(snapshot: dict[str, Any]) -> dict[str, Any]:
     sources = snapshot.get("sources") or []
     source = ", ".join(str(source) for source in sources) if sources else "unknown"
@@ -196,6 +227,225 @@ def _candidate_for_ticker(
     return None
 
 
+def _context_setup_stack(
+    *,
+    trader: str,
+    snapshot: dict[str, Any],
+    evidence: dict[str, Any],
+    technicals: dict[str, Any],
+) -> list[dict[str, str]]:
+    checks = [
+        _check("Data quality", _data_quality_status(snapshot), _data_quality_detail(snapshot))
+    ]
+    if trader == "timothy_sykes":
+        checks.extend(
+            [
+                _check(
+                    "Small-cap fit",
+                    _small_cap_status(snapshot),
+                    _small_cap_detail(snapshot),
+                ),
+                _check(
+                    "Float / rotation",
+                    _float_status(evidence),
+                    _float_detail(evidence),
+                ),
+                _check(
+                    "Catalyst context",
+                    _evidence_list_status(evidence, "catalysts"),
+                    _evidence_list_detail(evidence, "catalysts"),
+                ),
+                _check(
+                    "Filing context",
+                    _evidence_list_status(evidence, "filings"),
+                    _evidence_list_detail(evidence, "filings"),
+                ),
+                _check(
+                    "Intraday context",
+                    _technical_status(technicals, "intraday"),
+                    _technical_detail(technicals, "intraday"),
+                ),
+            ]
+        )
+        return checks
+
+    if trader == "lance_breitstein":
+        checks.extend(
+            [
+                _check(
+                    "Liquid-name fit",
+                    _liquid_name_status(snapshot),
+                    _liquid_name_detail(snapshot),
+                ),
+                _check(
+                    "Participation",
+                    _participation_status(snapshot),
+                    _participation_detail(snapshot),
+                ),
+                _check(
+                    "Intraday context",
+                    _technical_status(technicals, "intraday"),
+                    _technical_detail(technicals, "intraday"),
+                ),
+                _check(
+                    "Daily context",
+                    _technical_status(technicals, "daily"),
+                    _technical_detail(technicals, "daily"),
+                ),
+                _check(
+                    "Catalyst context",
+                    _evidence_list_status(evidence, "catalysts"),
+                    _evidence_list_detail(evidence, "catalysts"),
+                ),
+            ]
+        )
+        return checks
+
+    if trader in {"alex_temiz", "tim_grittani"}:
+        checks.extend(
+            [
+                _check(
+                    "Small-cap fit",
+                    _small_cap_status(snapshot),
+                    _small_cap_detail(snapshot),
+                ),
+                _check(
+                    "Participation",
+                    _participation_status(snapshot),
+                    _participation_detail(snapshot),
+                ),
+                _check(
+                    "Daily context",
+                    _technical_status(technicals, "daily"),
+                    _technical_detail(technicals, "daily"),
+                ),
+                _check(
+                    "Intraday context",
+                    _technical_status(technicals, "intraday"),
+                    _technical_detail(technicals, "intraday"),
+                ),
+                _check(
+                    "Catalyst context",
+                    _evidence_list_status(evidence, "catalysts"),
+                    _evidence_list_detail(evidence, "catalysts"),
+                ),
+            ]
+        )
+        return checks
+
+    checks.extend(
+        [
+            _check(
+                "Evidence context",
+                "PASS" if evidence else "UNKNOWN",
+                "Evidence packet is present." if evidence else "Evidence packet is unavailable.",
+            ),
+            _check(
+                "Intraday context",
+                _technical_status(technicals, "intraday"),
+                _technical_detail(technicals, "intraday"),
+            ),
+            _check(
+                "Daily context",
+                _technical_status(technicals, "daily"),
+                _technical_detail(technicals, "daily"),
+            ),
+        ]
+    )
+    return checks
+
+
+def _context_lens(trader: str) -> str:
+    return {
+        "timothy_sykes": "small_cap_gap_catalyst_and_float",
+        "lance_breitstein": "liquid_name_mean_reversion_context",
+        "alex_temiz": "small_cap_first_red_day_context",
+        "tim_grittani": "small_cap_morning_panic_context",
+    }.get(trader, "grounded_trader_context")
+
+
+def _context_verdict(snapshot: dict[str, Any]) -> str:
+    if _data_quality_status(snapshot) == "BLOCKED":
+        return "Blocked by data quality"
+    return "Context ready"
+
+
+def _context_moment_state(snapshot: dict[str, Any]) -> str:
+    if _data_quality_status(snapshot) == "BLOCKED":
+        return "not_ready_data_quality"
+    return "ready_for_profile_review"
+
+
+def _context_moment_path(
+    snapshot: dict[str, Any],
+    evidence: dict[str, Any],
+    technicals: dict[str, Any],
+) -> list[dict[str, str]]:
+    data_ready = _data_quality_status(snapshot) == "PASS"
+    evidence_ready = bool(evidence)
+    technical_ready = (
+        _technical_status(technicals, "intraday") == "PASS"
+        or _technical_status(technicals, "daily") == "PASS"
+    )
+    return [
+        _moment(
+            "Data",
+            "ready" if data_ready else "blocked",
+            _data_quality_detail(snapshot),
+        ),
+        _moment(
+            "Evidence",
+            "ready" if evidence_ready else "waiting",
+            "Evidence packet is present." if evidence_ready else "Evidence packet is unavailable.",
+        ),
+        _moment(
+            "Technicals",
+            "ready" if technical_ready else "waiting",
+            "At least one bar-derived packet is present."
+            if technical_ready
+            else "Requested bar-derived packet is unavailable or low confidence.",
+        ),
+        _moment(
+            "Profile review",
+            "ready" if data_ready else "blocked",
+            "Trader profile can review grounded context."
+            if data_ready
+            else "Profile review is blocked until data quality improves.",
+        ),
+    ]
+
+
+def _context_next_needed(
+    snapshot: dict[str, Any],
+    missing_fields: list[str],
+) -> list[str]:
+    needed: list[str] = []
+    if _data_quality_status(snapshot) == "BLOCKED":
+        needed.append("Fresh premarket quote with OK confidence")
+    mapping = {
+        "float": "Float data",
+        "rvol": "RVOL from the data layer",
+        "catalyst": "Catalyst classification",
+        "filings": "Recent filing context",
+        "former_runner": "Former-runner evidence",
+        "short_interest": "Short-interest data",
+        "intraday_bars": "Intraday bar packet",
+        "daily_bars": "Daily bar packet",
+        "vwap": "VWAP from intraday bars",
+        "order_flow": "Order-flow context",
+        "footprint": "Footprint context",
+    }
+    for field in missing_fields:
+        label = mapping.get(field, field)
+        if label not in needed:
+            needed.append(label)
+    return needed
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def _universe_fit_status(
     snapshot: dict[str, Any],
     candidate: dict[str, Any] | None,
@@ -221,6 +471,36 @@ def _universe_fit_detail(
     if snapshot.get("market_cap") is not None:
         return "Market cap is available; liquid-name fit is inferred only from cap tier."
     return "Market cap is unknown."
+
+
+def _small_cap_status(snapshot: dict[str, Any]) -> str:
+    market_cap = snapshot.get("market_cap")
+    if not isinstance(market_cap, int | float):
+        return "UNKNOWN"
+    return "PASS" if market_cap <= 2_000_000_000 else "FAIL"
+
+
+def _small_cap_detail(snapshot: dict[str, Any]) -> str:
+    if snapshot.get("market_cap") is None:
+        return "Market cap is unknown."
+    if _small_cap_status(snapshot) == "PASS":
+        return "Market cap fits the small-cap profile in the data card."
+    return "Market cap is above the small-cap profile range in the data card."
+
+
+def _liquid_name_status(snapshot: dict[str, Any]) -> str:
+    market_cap = snapshot.get("market_cap")
+    if not isinstance(market_cap, int | float):
+        return "UNKNOWN"
+    return "PASS" if market_cap >= 2_000_000_000 else "FAIL"
+
+
+def _liquid_name_detail(snapshot: dict[str, Any]) -> str:
+    if snapshot.get("market_cap") is None:
+        return "Market cap is unknown."
+    if _liquid_name_status(snapshot) == "PASS":
+        return "Market cap fits the liquid-name profile in the data card."
+    return "Market cap is below the liquid-name profile range in the data card."
 
 
 def _move_status(snapshot: dict[str, Any]) -> str:
@@ -276,6 +556,66 @@ def _candidate_has_catalyst(candidate: dict[str, Any] | None) -> bool:
         return True
     evidence = candidate.get("evidence") or {}
     return bool(evidence.get("catalysts") or evidence.get("filings"))
+
+
+def _float_status(evidence: dict[str, Any]) -> str:
+    if not evidence:
+        return "UNKNOWN"
+    if evidence.get("is_low_float") is True:
+        return "PASS"
+    if isinstance(evidence.get("float_rotation"), int | float):
+        return "PASS"
+    if evidence.get("is_low_float") is False:
+        return "FAIL"
+    return "UNKNOWN"
+
+
+def _float_detail(evidence: dict[str, Any]) -> str:
+    if not evidence:
+        return "Float and rotation evidence is unavailable."
+    if evidence.get("is_low_float") is True:
+        return "Low-float evidence is present."
+    if isinstance(evidence.get("float_rotation"), int | float):
+        return "Float-rotation evidence is present."
+    if evidence.get("is_low_float") is False:
+        return "Low-float evidence is explicitly false."
+    return "Float and rotation evidence is unknown."
+
+
+def _evidence_list_status(evidence: dict[str, Any], key: str) -> str:
+    if not evidence:
+        return "UNKNOWN"
+    return "PASS" if evidence.get(key) else "UNKNOWN"
+
+
+def _evidence_list_detail(evidence: dict[str, Any], key: str) -> str:
+    label = key.replace("_", " ")
+    if not evidence:
+        return f"{label} evidence is unavailable."
+    if evidence.get(key):
+        return f"{label} evidence is present."
+    return f"{label} evidence is unknown."
+
+
+def _technical_status(technicals: dict[str, Any], key: str) -> str:
+    packet = _as_dict(technicals.get(key))
+    if not packet:
+        return "UNKNOWN"
+    confidence = packet.get("confidence")
+    if confidence == "OK":
+        return "PASS"
+    if confidence == "ERROR":
+        return "BLOCKED"
+    return "UNKNOWN"
+
+
+def _technical_detail(technicals: dict[str, Any], key: str) -> str:
+    packet = _as_dict(technicals.get(key))
+    label = key.replace("_", " ")
+    if not packet:
+        return f"{label} packet is unavailable."
+    confidence = packet.get("confidence") or "unknown"
+    return f"{label} packet confidence={confidence}."
 
 
 def _ny_session_label(timestamp: Any) -> str:

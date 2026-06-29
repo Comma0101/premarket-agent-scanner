@@ -297,6 +297,40 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "scan_grittani_morning_panic",
+        "description": (
+            "Run Tim Grittani-style morning panic analysis over explicit tickers. "
+            "It checks a large multi-day run, RVOL from an upstream data-layer "
+            "scan, a 9:30-10:00 ET panic drop, and first-green-bar confirmation. "
+            "Returned levels are rule-derived scanner references, not buy/sell "
+            "advice, price targets, sizing, or order instructions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tickers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "description": (
+                        "Ticker symbols to analyze with morning panic rules, "
+                        "e.g. ['HOT', 'MOMO']."
+                    ),
+                },
+                "rvol_by_ticker": {
+                    "type": "object",
+                    "additionalProperties": {"type": "number"},
+                    "description": (
+                        "Optional grounded RVOL map keyed by ticker. A ticker "
+                        "without RVOL cannot pass the Grittani service-level "
+                        "volume gate."
+                    ),
+                },
+            },
+            "required": ["tickers"],
+        },
+    },
+    {
         "name": "get_trader_context",
         "description": (
             "Build the shared read-only trader context packet for one ticker. "
@@ -331,6 +365,53 @@ TOOLS: list[dict[str, Any]] = [
                     "description": (
                         "Include daily bar-derived support/resistance pivots when "
                         "bar data is available. Defaults to false."
+                    ),
+                },
+                "refresh_catalysts": {
+                    "type": "boolean",
+                    "description": (
+                        "Opt in to live RSS catalyst lookup during evidence "
+                        "enrichment. Defaults to false."
+                    ),
+                },
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
+        "name": "explain_ticker_as_trader",
+        "description": (
+            "Build the shared read-only trader context packet for one ticker and "
+            "format it into a moment-wise Desk explanation for a requested trader "
+            "profile. Use this when the user asks what a distilled trader thinks "
+            "of one ticker. It is not buy/sell advice."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "Ticker symbol, e.g. 'MRVL'.",
+                },
+                "trader_profile": {
+                    "type": "string",
+                    "description": (
+                        "Trader profile key, e.g. 'timothy_sykes', "
+                        "'lance_breitstein', 'alex_temiz', or 'tim_grittani'."
+                    ),
+                },
+                "include_intraday": {
+                    "type": "boolean",
+                    "description": (
+                        "Include intraday bar-derived context when available. "
+                        "Defaults to false."
+                    ),
+                },
+                "include_daily": {
+                    "type": "boolean",
+                    "description": (
+                        "Include daily bar-derived context when available. "
+                        "Defaults to false."
                     ),
                 },
                 "refresh_catalysts": {
@@ -385,7 +466,9 @@ _DISPATCH: dict[str, Callable[..., dict[str, Any]]] = {
     "explain_breitstein_ticker": tools.explain_breitstein_ticker,
     "scan_breitstein_intraday": tools.scan_breitstein_intraday,
     "scan_temiz_first_red_day": tools.scan_temiz_first_red_day,
+    "scan_grittani_morning_panic": tools.scan_grittani_morning_panic,
     "get_trader_context": tools.get_trader_context,
+    "explain_ticker_as_trader": tools.explain_ticker_as_trader,
     "list_universes": tools.list_universes,
     "get_ticker_snapshot": tools.get_ticker_snapshot,
 }

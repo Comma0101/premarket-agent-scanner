@@ -387,6 +387,26 @@ class FirstRedDaySignal:
     notes: list[str] = field(default_factory=list)
 
 
+@dataclass
+class GrittaniPanicSignal:
+    ticker: str
+    multi_day_run_pct: float | None
+    intraday_drop_pct: float | None
+    panic_high: float | None
+    panic_low: float | None
+    bounce_reference_price: float | None
+    risk_reference_price: float | None
+    prior_day_close: float | None
+    vwap: float | None
+    rvol: float | None
+    timestamp: str
+    source: str | None
+    fetched_at: str | None
+    confidence: str
+    missing_fields: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
 class PriceProvider(Protocol):
     source_name: str
 

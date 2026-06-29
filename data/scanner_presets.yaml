@@ -61,3 +61,26 @@ temiz_small_cap_v0:
     - "First red day preset for small-cap prep only."
     - "Executable signals require the dedicated Temiz bar tool."
     - "Reference levels are scanner facts, not trade advice."
+grittani_panic_v0:
+  cap_tiers:
+    - nano
+    - micro
+    - small
+  direction: both
+  min_gap_abs: 0.0
+  min_volume: 500000
+  min_rel_volume: 5.0
+  include_low_confidence: false
+  missing_fields:
+    - daily_bars
+    - intraday_bars
+    - rvol
+    - vwap
+    - catalyst
+    - filings
+    - short_interest
+  notes:
+    - "Morning panic preset for small-cap prep only."
+    - "Executable signals require the dedicated Grittani bar tool."
+    - "RVOL is a hard service-level gate; missing RVOL remains unknown."
+    - "Reference levels are scanner facts, not trade advice."

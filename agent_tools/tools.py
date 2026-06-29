@@ -20,6 +20,7 @@ from app.models import (
     FilingEvent,
     FirstRedDaySignal,
     FormerRunnerEvent,
+    GrittaniPanicSignal,
     IntradayBar,
     ScannerResult,
     SmallCapEvidence,
@@ -231,6 +232,27 @@ def _first_red_day_signal_to_dict(signal: FirstRedDaySignal) -> dict[str, Any]:
     }
 
 
+def _grittani_panic_signal_to_dict(signal: GrittaniPanicSignal) -> dict[str, Any]:
+    return {
+        "ticker": signal.ticker,
+        "multi_day_run_pct": signal.multi_day_run_pct,
+        "intraday_drop_pct": signal.intraday_drop_pct,
+        "panic_high": signal.panic_high,
+        "panic_low": signal.panic_low,
+        "bounce_reference_price": signal.bounce_reference_price,
+        "risk_reference_price": signal.risk_reference_price,
+        "prior_day_close": signal.prior_day_close,
+        "vwap": signal.vwap,
+        "rvol": signal.rvol,
+        "timestamp": signal.timestamp,
+        "source": signal.source,
+        "fetched_at": signal.fetched_at,
+        "confidence": signal.confidence,
+        "missing_fields": list(signal.missing_fields),
+        "notes": list(signal.notes),
+    }
+
+
 def _first_red_day_error_to_dict(ticker: str, exc: Exception) -> dict[str, Any]:
     return {
         "ticker": ticker.upper(),
@@ -240,6 +262,19 @@ def _first_red_day_error_to_dict(ticker: str, exc: Exception) -> dict[str, Any]:
         "timestamp": utc_now_iso(),
         "notes": [
             "First red day scan failed for this ticker; no signal was inferred."
+        ],
+    }
+
+
+def _grittani_panic_error_to_dict(ticker: str, exc: Exception) -> dict[str, Any]:
+    return {
+        "ticker": ticker.upper(),
+        "confidence": "ERROR",
+        "missing_fields": ["bar_data"],
+        "error": str(exc),
+        "timestamp": utc_now_iso(),
+        "notes": [
+            "Morning panic scan failed for this ticker; no signal was inferred."
         ],
     }
 
@@ -538,6 +573,50 @@ def scan_temiz_first_red_day(
     }
 
 
+def scan_grittani_morning_panic(
+    *,
+    tickers: list[str],
+    rvol_by_ticker: dict[str, float] | None = None,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    """Run Tim Grittani-style morning panic analysis over explicit tickers."""
+    if not tickers:
+        return {"error": "tickers is required and must be non-empty."}
+
+    if service is None:
+        from providers.alpaca_provider import AlpacaProvider
+        from services.grittani_analysis_service import GrittaniAnalysisService
+
+        service = GrittaniAnalysisService(provider=AlpacaProvider())
+
+    rvol_by_ticker = rvol_by_ticker or {}
+    signals = []
+    errors = []
+    for ticker in tickers:
+        normalized = ticker.upper()
+        try:
+            signal = service.detect_morning_panic(
+                normalized,
+                rvol=rvol_by_ticker.get(normalized),
+            )
+            if signal is not None:
+                signals.append(_grittani_panic_signal_to_dict(signal))
+        except Exception as exc:
+            errors.append(_grittani_panic_error_to_dict(normalized, exc))
+
+    return {
+        "ticker_count": len(tickers),
+        "signal_count": len(signals),
+        "signals": signals,
+        "error_count": len(errors),
+        "errors": errors,
+        "notes": [
+            "Morning panic levels are rule-derived scanner references, not execution advice.",
+            "RVOL must come from an upstream data-layer scan; missing RVOL produces no signal.",
+        ],
+    }
+
+
 def get_trader_context(
     *,
     ticker: str,
@@ -572,6 +651,46 @@ def get_trader_context(
         )
     except ValueError as exc:
         return {"error": str(exc)}
+
+
+def explain_ticker_as_trader(
+    *,
+    ticker: str,
+    trader_profile: str = "default",
+    include_intraday: bool = False,
+    include_daily: bool = False,
+    refresh_catalysts: bool = False,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    """Build and format one ticker's context through a trader profile lens."""
+    if not ticker or not ticker.strip():
+        return {"error": "ticker is required."}
+
+    if service is None:
+        bar_provider = None
+        if include_intraday or include_daily:
+            from providers.alpaca_provider import AlpacaProvider
+
+            bar_provider = AlpacaProvider()
+
+        from services.trader_context_service import TraderContextService
+
+        service = TraderContextService(bar_provider=bar_provider)
+
+    try:
+        context = service.build_context(
+            ticker=ticker.strip().upper(),
+            trader_profile=trader_profile,
+            include_intraday=include_intraday,
+            include_daily=include_daily,
+            refresh_catalysts=refresh_catalysts,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    from services.desk_explainer import build_trader_context_explanation
+
+    return build_trader_context_explanation(context)
 
 
 def list_universes(*, service: UniverseService | None = None) -> dict[str, Any]:

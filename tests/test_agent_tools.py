@@ -394,6 +394,71 @@ def test_scan_temiz_first_red_day_tool_requires_tickers():
     assert "error" in out
 
 
+def test_scan_grittani_morning_panic_tool_returns_reference_signal():
+    from app.models import GrittaniPanicSignal
+
+    class FakeGrittaniService:
+        def detect_morning_panic(self, ticker, rvol=None):
+            assert rvol == 6.5
+            return GrittaniPanicSignal(
+                ticker=ticker,
+                multi_day_run_pct=200.0,
+                intraday_drop_pct=40.0,
+                panic_high=20.0,
+                panic_low=12.0,
+                bounce_reference_price=13.0,
+                risk_reference_price=12.0,
+                prior_day_close=15.0,
+                vwap=14.2,
+                rvol=rvol,
+                timestamp="2026-06-29T13:38:00Z",
+                source="fake-bars",
+                fetched_at="2026-06-29T14:10:00Z",
+                confidence="OK",
+                notes=["reference only"],
+            )
+
+    out = tools.scan_grittani_morning_panic(
+        tickers=["HOT"],
+        rvol_by_ticker={"HOT": 6.5},
+        service=FakeGrittaniService(),
+    )
+
+    assert out["ticker_count"] == 1
+    assert out["signal_count"] == 1
+    assert out["error_count"] == 0
+    assert out["signals"][0]["ticker"] == "HOT"
+    assert out["signals"][0]["bounce_reference_price"] == 13.0
+    assert out["signals"][0]["risk_reference_price"] == 12.0
+    assert out["signals"][0]["rvol"] == 6.5
+    assert out["signals"][0]["source"] == "fake-bars"
+    assert out["notes"]
+
+
+def test_scan_grittani_morning_panic_tool_surfaces_ticker_errors():
+    class RaisingGrittaniService:
+        def detect_morning_panic(self, ticker, rvol=None):
+            raise RuntimeError("bars unavailable")
+
+    out = tools.scan_grittani_morning_panic(
+        tickers=["HOT"],
+        rvol_by_ticker={"HOT": 6.5},
+        service=RaisingGrittaniService(),
+    )
+
+    assert out["signal_count"] == 0
+    assert out["error_count"] == 1
+    assert out["errors"][0]["ticker"] == "HOT"
+    assert out["errors"][0]["confidence"] == "ERROR"
+    assert out["errors"][0]["missing_fields"] == ["bar_data"]
+    assert "bars unavailable" in out["errors"][0]["error"]
+
+
+def test_scan_grittani_morning_panic_tool_requires_tickers():
+    out = tools.scan_grittani_morning_panic(tickers=[])
+    assert "error" in out
+
+
 def test_get_trader_context_tool_with_injected_service():
     class FakeTraderContextService:
         def build_context(self, **kwargs):
@@ -419,6 +484,64 @@ def test_get_trader_context_tool_with_injected_service():
 
     assert out["ticker"] == "HOT"
     assert out["snapshot"]["confidence"] == "OK"
+
+
+def test_explain_ticker_as_trader_tool_formats_context_packet():
+    class FakeTraderContextService:
+        def build_context(self, **kwargs):
+            assert kwargs["ticker"] == "HOT"
+            assert kwargs["trader_profile"] == "timothy_sykes"
+            assert kwargs["include_intraday"] is True
+            assert kwargs["include_daily"] is False
+            assert kwargs["refresh_catalysts"] is False
+            return {
+                "ticker": "HOT",
+                "trader_profile": "timothy_sykes",
+                "snapshot": {
+                    "ticker": "HOT",
+                    "previous_close": 10.0,
+                    "premarket_price": 11.2,
+                    "latest_price": 11.2,
+                    "gap_pct": 12.0,
+                    "gap_dollar": 1.2,
+                    "gap_basis": "premarket",
+                    "market_cap": 75_000_000.0,
+                    "volume": 2_000_000.0,
+                    "rel_volume": 4.5,
+                    "confidence": "OK",
+                    "sources": ["fake"],
+                    "timestamp": "2026-06-29T13:30:00Z",
+                },
+                "evidence": {
+                    "float_shares": 5_000_000.0,
+                    "is_low_float": True,
+                    "catalysts": [{"headline": "HOT wins supply deal"}],
+                    "filings": [],
+                    "missing_fields": ["short_interest"],
+                },
+                "technicals": {"intraday": None, "daily": None},
+                "missing_fields": ["short_interest", "intraday_bars"],
+                "sources": ["fake"],
+                "notes": [],
+            }
+
+    out = tools.explain_ticker_as_trader(
+        ticker="HOT",
+        trader_profile="timothy_sykes",
+        include_intraday=True,
+        service=FakeTraderContextService(),
+    )
+
+    assert out["ticker"] == "HOT"
+    assert out["trader"] == "timothy_sykes"
+    assert out["verdict"] == "Context ready"
+    assert out["data_card"]["gap_basis"] == "premarket"
+    assert out["disclaimer"].startswith("Matches your filter")
+
+
+def test_explain_ticker_as_trader_tool_requires_ticker():
+    out = tools.explain_ticker_as_trader(ticker="")
+    assert "error" in out
 
 
 def test_get_trader_context_tool_requires_ticker():
@@ -530,7 +653,9 @@ def test_tool_definitions_are_well_formed():
         "explain_breitstein_ticker",
         "scan_breitstein_intraday",
         "scan_temiz_first_red_day",
+        "scan_grittani_morning_panic",
         "get_trader_context",
+        "explain_ticker_as_trader",
         "list_universes",
         "get_ticker_snapshot",
     }
@@ -560,5 +685,12 @@ def test_tool_definitions_are_well_formed():
     temiz_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "scan_temiz_first_red_day")
     assert temiz_tool["input_schema"]["required"] == ["tickers"]
 
+    grittani_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "scan_grittani_morning_panic")
+    assert grittani_tool["input_schema"]["required"] == ["tickers"]
+    assert "rvol_by_ticker" in grittani_tool["input_schema"]["properties"]
+
     context_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "get_trader_context")
     assert context_tool["input_schema"]["required"] == ["ticker"]
+
+    explain_context_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "explain_ticker_as_trader")
+    assert explain_context_tool["input_schema"]["required"] == ["ticker"]

@@ -1,4 +1,7 @@
-from services.desk_explainer import build_breitstein_ticker_explanation
+from services.desk_explainer import (
+    build_breitstein_ticker_explanation,
+    build_trader_context_explanation,
+)
 
 
 def _snapshot(**overrides):
@@ -101,3 +104,75 @@ def test_breitstein_explainer_summarizes_phase_one_candidate() -> None:
     assert stack["Participation"]["status"] == "PASS"
     assert stack["Catalyst context"]["status"] == "PASS"
     assert stack["Intraday trigger"]["status"] == "UNKNOWN"
+
+
+def test_context_explainer_formats_timothy_sykes_packet() -> None:
+    explanation = build_trader_context_explanation(
+        {
+            "ticker": "HOT",
+            "trader_profile": "timothy_sykes",
+            "snapshot": {
+                "ticker": "HOT",
+                "previous_close": 10.0,
+                "premarket_price": 11.2,
+                "latest_price": 11.2,
+                "gap_pct": 12.0,
+                "gap_dollar": 1.2,
+                "gap_basis": "premarket",
+                "market_cap": 75_000_000.0,
+                "volume": 2_000_000.0,
+                "rel_volume": 4.5,
+                "confidence": "OK",
+                "sources": ["fake"],
+                "timestamp": "2026-06-29T13:30:00Z",
+            },
+            "evidence": {
+                "float_shares": 5_000_000.0,
+                "float_rotation": 0.4,
+                "is_low_float": True,
+                "catalysts": [{"headline": "HOT wins supply deal"}],
+                "filings": [{"form_type": "8-K"}],
+                "missing_fields": ["short_interest"],
+            },
+            "technicals": {"intraday": None, "daily": None},
+            "missing_fields": ["short_interest", "intraday_bars"],
+            "sources": ["fake"],
+            "notes": ["context note"],
+        }
+    )
+
+    assert explanation["ticker"] == "HOT"
+    assert explanation["trader"] == "timothy_sykes"
+    assert explanation["verdict"] == "Context ready"
+    assert explanation["moment_state"] == "ready_for_profile_review"
+    assert explanation["data_card"]["gap_basis"] == "premarket"
+    assert explanation["data_card"]["confidence"] == "OK"
+    stack = {item["label"]: item for item in explanation["setup_stack"]}
+    assert stack["Data quality"]["status"] == "PASS"
+    assert stack["Small-cap fit"]["status"] == "PASS"
+    assert stack["Float / rotation"]["status"] == "PASS"
+    assert stack["Catalyst context"]["status"] == "PASS"
+    assert stack["Intraday context"]["status"] == "UNKNOWN"
+    assert "short_interest" in explanation["what_we_lack"]
+    assert explanation["disclaimer"].startswith("Matches your filter")
+
+
+def test_context_explainer_blocks_on_bad_snapshot_quality() -> None:
+    explanation = build_trader_context_explanation(
+        {
+            "ticker": "MRVL",
+            "trader_profile": "lance_breitstein",
+            "snapshot": _snapshot(),
+            "evidence": None,
+            "technicals": {"intraday": None, "daily": None},
+            "missing_fields": ["float", "catalyst"],
+            "sources": ["yfinance"],
+            "notes": [],
+        }
+    )
+
+    assert explanation["verdict"] == "Blocked by data quality"
+    assert explanation["moment_state"] == "not_ready_data_quality"
+    stack = {item["label"]: item for item in explanation["setup_stack"]}
+    assert stack["Data quality"]["status"] == "BLOCKED"
+    assert stack["Intraday context"]["status"] == "UNKNOWN"
