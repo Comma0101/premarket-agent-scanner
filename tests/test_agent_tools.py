@@ -67,7 +67,7 @@ def test_scan_premarket_tool_validates_selection_and_direction():
 
 
 def test_scan_small_caps_tool_returns_candidates():
-    from app.models import SmallCapCandidate, SmallCapScanOutput
+    from app.models import SmallCapCandidate, SmallCapEvidence, SmallCapScanOutput
 
     class FakeSmallCapService:
         def scan(self, **kwargs):
@@ -91,6 +91,13 @@ def test_scan_small_caps_tool_returns_candidates():
                         missing_fields=["float"],
                         risk_notes=[],
                         sources=["fake"],
+                        evidence=SmallCapEvidence(
+                            ticker="HOT",
+                            float_shares=8_000_000,
+                            is_low_float=True,
+                            missing_fields=["catalyst"],
+                            risk_notes=["filings are unknown"],
+                        ),
                         timestamp="2026-06-28T12:00:00Z",
                     )
                 ],
@@ -107,6 +114,9 @@ def test_scan_small_caps_tool_returns_candidates():
     assert out["candidates"][0]["ticker"] == "HOT"
     assert out["candidates"][0]["grade"] == "A_WATCH"
     assert "float" in out["candidates"][0]["missing_fields"]
+    assert out["candidates"][0]["evidence"]["float_shares"] == 8_000_000
+    assert out["candidates"][0]["evidence"]["is_low_float"] is True
+    assert "catalyst" in out["candidates"][0]["evidence"]["missing_fields"]
 
 
 def test_list_universes_tool_shape():

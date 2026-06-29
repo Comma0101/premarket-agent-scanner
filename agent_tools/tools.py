@@ -14,7 +14,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.models import ScannerResult, make_scan_filters
+from app.models import (
+    CatalystEvent,
+    FilingEvent,
+    FormerRunnerEvent,
+    ScannerResult,
+    SmallCapEvidence,
+    make_scan_filters,
+)
 from services.scanner_service import ScannerService
 from services.snapshot_service import SnapshotService
 from services.universe_service import UniverseService
@@ -40,6 +47,70 @@ def _result_to_dict(result: ScannerResult) -> dict[str, Any]:
     }
 
 
+def _filing_event_to_dict(filing: FilingEvent) -> dict[str, Any]:
+    return {
+        "ticker": filing.ticker,
+        "form_type": filing.form_type,
+        "filed_at": filing.filed_at,
+        "accession_number": filing.accession_number,
+        "description": filing.description,
+        "source_url": filing.source_url,
+        "risk_tags": list(filing.risk_tags),
+    }
+
+
+def _catalyst_event_to_dict(catalyst: CatalystEvent) -> dict[str, Any]:
+    return {
+        "ticker": catalyst.ticker,
+        "headline": catalyst.headline,
+        "published_at": catalyst.published_at,
+        "source": catalyst.source,
+        "url": catalyst.url,
+        "summary": catalyst.summary,
+        "confidence": catalyst.confidence,
+    }
+
+
+def _former_runner_event_to_dict(event: FormerRunnerEvent) -> dict[str, Any]:
+    return {
+        "ticker": event.ticker,
+        "event_date": event.event_date,
+        "max_gap_pct": event.max_gap_pct,
+        "max_volume": event.max_volume,
+        "source_run_id": event.source_run_id,
+        "notes": list(event.notes),
+    }
+
+
+def _small_cap_evidence_to_dict(
+    evidence: SmallCapEvidence | None,
+) -> dict[str, Any] | None:
+    if evidence is None:
+        return None
+
+    return {
+        "ticker": evidence.ticker,
+        "float_shares": evidence.float_shares,
+        "shares_outstanding": evidence.shares_outstanding,
+        "float_source": evidence.float_source,
+        "exchange": evidence.exchange,
+        "is_low_float": evidence.is_low_float,
+        "filings": [_filing_event_to_dict(filing) for filing in evidence.filings],
+        "catalysts": [
+            _catalyst_event_to_dict(catalyst) for catalyst in evidence.catalysts
+        ],
+        "former_runner": (
+            _former_runner_event_to_dict(evidence.former_runner)
+            if evidence.former_runner is not None
+            else None
+        ),
+        "missing_fields": list(evidence.missing_fields),
+        "risk_notes": list(evidence.risk_notes),
+        "sources": list(evidence.sources),
+        "updated_at": evidence.updated_at,
+    }
+
+
 def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
     return {
         "ticker": candidate.ticker,
@@ -56,6 +127,7 @@ def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
         "missing_fields": candidate.missing_fields,
         "risk_notes": candidate.risk_notes,
         "sources": candidate.sources,
+        "evidence": _small_cap_evidence_to_dict(candidate.evidence),
         "timestamp": candidate.timestamp,
     }
 
