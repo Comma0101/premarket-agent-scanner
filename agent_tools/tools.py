@@ -789,6 +789,42 @@ def run_morning_brief(
         return {"error": str(exc)}
 
 
+def deep_dive_ticker(
+    *,
+    ticker: str,
+    trader_profile: str = "default",
+    include_intraday: bool = True,
+    include_daily: bool = True,
+    refresh_catalysts: bool = False,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    """Run the single-ticker deep dive orchestrator."""
+    if not ticker or not ticker.strip():
+        return {"error": "ticker is required."}
+
+    if service is None:
+        bar_provider = None
+        if include_intraday or include_daily:
+            from providers.alpaca_provider import AlpacaProvider
+
+            bar_provider = AlpacaProvider()
+
+        from services.deep_dive_service import DeepDiveService
+
+        service = DeepDiveService(bar_provider=bar_provider)
+
+    try:
+        return service.run(
+            ticker=ticker.strip().upper(),
+            trader_profile=trader_profile,
+            include_intraday=include_intraday,
+            include_daily=include_daily,
+            refresh_catalysts=refresh_catalysts,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
 def _normalize_ticker_list(tickers: list[str] | str | None) -> list[str] | None:
     if tickers is None:
         return None

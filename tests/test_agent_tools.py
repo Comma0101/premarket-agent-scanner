@@ -657,6 +657,40 @@ def test_run_morning_brief_tool_requires_selection():
     assert "error" in out
 
 
+def test_deep_dive_ticker_tool_returns_packet():
+    class FakeDeepDiveService:
+        def run(self, **kwargs):
+            assert kwargs["ticker"] == "HOT"
+            assert kwargs["trader_profile"] == "alex_temiz"
+            assert kwargs["include_intraday"] is True
+            assert kwargs["include_daily"] is True
+            assert kwargs["refresh_catalysts"] is False
+            return {
+                "ticker": "HOT",
+                "status": "OK",
+                "snapshot": {"confidence": "OK"},
+                "scanner_results": {"temiz_first_red_day": {"triggered": False}},
+                "disclaimer": "Matches your filter — not buy/sell advice. Verify before acting.",
+            }
+
+    out = tools.deep_dive_ticker(
+        ticker="HOT",
+        trader_profile="alex_temiz",
+        include_intraday=True,
+        include_daily=True,
+        service=FakeDeepDiveService(),
+    )
+
+    assert out["ticker"] == "HOT"
+    assert out["status"] == "OK"
+    assert out["snapshot"]["confidence"] == "OK"
+
+
+def test_deep_dive_ticker_tool_requires_ticker():
+    out = tools.deep_dive_ticker(ticker="")
+    assert "error" in out
+
+
 def test_get_trader_context_tool_requires_ticker():
     out = tools.get_trader_context(ticker="")
     assert "error" in out
@@ -771,6 +805,7 @@ def test_tool_definitions_are_well_formed():
         "explain_ticker_as_trader",
         "run_desk",
         "run_morning_brief",
+        "deep_dive_ticker",
         "list_universes",
         "get_ticker_snapshot",
     }
@@ -820,3 +855,7 @@ def test_tool_definitions_are_well_formed():
     assert morning_tool["input_schema"]["required"] == []
     assert "profile" in morning_tool["input_schema"]["properties"]
     assert "save_journal" in morning_tool["input_schema"]["properties"]
+
+    deep_dive_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "deep_dive_ticker")
+    assert deep_dive_tool["input_schema"]["required"] == ["ticker"]
+    assert "trader_profile" in deep_dive_tool["input_schema"]["properties"]

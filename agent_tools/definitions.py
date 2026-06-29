@@ -616,6 +616,52 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "deep_dive_ticker",
+        "description": (
+            "Run a single-ticker Desk deep dive in one call. It returns the "
+            "grounded snapshot, evidence, technical context, support/resistance "
+            "levels, every mechanical scanner result, and reference levels where "
+            "a scanner triggered. It is not buy/sell advice."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "Ticker symbol to inspect, e.g. 'MRVL'.",
+                },
+                "trader_profile": {
+                    "type": "string",
+                    "description": (
+                        "Profile lens for selecting the preferred reference "
+                        "context. Defaults to default; examples include "
+                        "lance_breitstein, alex_temiz, tim_grittani, and "
+                        "timothy_sykes."
+                    ),
+                },
+                "include_intraday": {
+                    "type": "boolean",
+                    "description": (
+                        "Include intraday technical context and intraday scanner "
+                        "checks when bar data is available. Defaults to true."
+                    ),
+                },
+                "include_daily": {
+                    "type": "boolean",
+                    "description": (
+                        "Include daily pivots/context and daily-dependent scanner "
+                        "checks when bar data is available. Defaults to true."
+                    ),
+                },
+                "refresh_catalysts": {
+                    "type": "boolean",
+                    "description": "Opt in to live RSS catalyst lookup.",
+                },
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
         "name": "list_universes",
         "description": (
             "List the defined universes and watchlists with their member tickers. "
@@ -661,6 +707,7 @@ _DISPATCH: dict[str, Callable[..., dict[str, Any]]] = {
     "explain_ticker_as_trader": tools.explain_ticker_as_trader,
     "run_desk": tools.run_desk,
     "run_morning_brief": tools.run_morning_brief,
+    "deep_dive_ticker": tools.deep_dive_ticker,
     "list_universes": tools.list_universes,
     "get_ticker_snapshot": tools.get_ticker_snapshot,
 }
