@@ -31,6 +31,11 @@ def main(
         "--market-limit",
         help="Limit market symbols for smoke tests.",
     ),
+    max_workers: int | None = typer.Option(
+        None,
+        "--max-workers",
+        help="Bounded worker count for broad market scans.",
+    ),
     all_universes: bool = typer.Option(False, "--all", help="Scan every defined universe."),
 ) -> None:
     if not any([universe, watchlist, tickers, market, all_universes]):
@@ -46,6 +51,7 @@ def main(
             tickers=tickers,
             market=market,
             market_limit=market_limit,
+            max_workers=max_workers,
             all_universes=all_universes,
         )
     except (KeyError, ValueError) as exc:

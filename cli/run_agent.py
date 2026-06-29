@@ -23,6 +23,11 @@ def main(
         "--market-limit",
         help="Limit market symbols for smoke tests.",
     ),
+    max_workers: int | None = typer.Option(
+        None,
+        "--max-workers",
+        help="Bounded worker count for broad market scans.",
+    ),
     all_universes: bool = typer.Option(False, "--all", help="Scan every defined universe."),
     preset_name: str = typer.Option(
         "sykes_small_cap_v0",
@@ -43,6 +48,7 @@ def main(
         watchlist=watchlist,
         market=market,
         market_limit=market_limit,
+        max_workers=max_workers,
         all_universes=all_universes,
         user_query="run sykes-style small-cap watchlist agent",
     )

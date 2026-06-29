@@ -210,6 +210,7 @@ def test_run_agent_cli_json_output(monkeypatch):
         def run_sykes_small_cap_watchlist(self, **kwargs):
             assert kwargs["market"] == "us-listed"
             assert kwargs["market_limit"] == 25
+            assert kwargs["max_workers"] == 6
             return AgentRunPacket(
                 agent_name="sykes_style_small_cap_agent",
                 strategy="sykes_small_cap_watchlist",
@@ -230,7 +231,7 @@ def test_run_agent_cli_json_output(monkeypatch):
 
     result = CliRunner().invoke(
         run_agent.app,
-        ["--market", "us-listed", "--market-limit", "25", "--json"],
+        ["--market", "us-listed", "--market-limit", "25", "--max-workers", "6", "--json"],
     )
 
     assert result.exit_code == 0

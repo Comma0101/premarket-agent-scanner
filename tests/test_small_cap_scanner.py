@@ -13,6 +13,7 @@ from app.models import (
     ScanRunOutput,
     SmallCapCandidate,
     SmallCapEvidence,
+    SmallCapScanOutput,
 )
 from cli.scan_small_caps import _format_evidence_float
 from services.scanner_service import compute_float_rotation
@@ -171,6 +172,35 @@ def test_scan_small_caps_cli_reports_market_source_failure_cleanly(monkeypatch):
     assert "Traceback" not in result.output
     assert "Market universe us-listed unavailable" in result.output
     assert "nasdaq trader offline" in result.output
+
+
+def test_scan_small_caps_cli_passes_max_workers(monkeypatch):
+    import cli.scan_small_caps as module
+
+    calls = {}
+
+    class FakeSmallCapScannerService:
+        def scan(self, **kwargs):
+            calls.update(kwargs)
+            return SmallCapScanOutput(
+                preset=kwargs["preset_name"],
+                run_ids=[],
+                candidate_count=0,
+                candidates=[],
+                notes=[],
+            )
+
+    monkeypatch.setattr(module, "SmallCapScannerService", FakeSmallCapScannerService)
+
+    result = CliRunner().invoke(
+        module.app,
+        ["--market", "us-listed", "--market-limit", "25", "--max-workers", "6"],
+    )
+
+    assert result.exit_code == 0
+    assert calls["market"] == "us-listed"
+    assert calls["market_limit"] == 25
+    assert calls["max_workers"] == 6
 
 
 def _result(
