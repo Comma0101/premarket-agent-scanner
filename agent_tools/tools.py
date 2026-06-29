@@ -15,12 +15,16 @@ from __future__ import annotations
 from typing import Any
 
 from app.models import (
+    BreitsteinEntrySignal,
     CatalystEvent,
     FilingEvent,
+    FirstRedDaySignal,
     FormerRunnerEvent,
+    IntradayBar,
     ScannerResult,
     SmallCapEvidence,
     make_scan_filters,
+    utc_now_iso,
 )
 from services.scanner_service import ScannerService
 from services.snapshot_service import SnapshotService
@@ -142,6 +146,104 @@ def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
     }
 
 
+def _breitstein_candidate_to_dict(candidate: Any) -> dict[str, Any]:
+    missing_fields = (
+        candidate.evidence.missing_fields
+        if candidate.evidence is not None
+        else candidate.missing_fields
+    )
+    return {
+        "ticker": candidate.ticker,
+        "name": candidate.name,
+        "market_cap": candidate.market_cap,
+        "gap_pct": candidate.gap_pct,
+        "gap_dollar": candidate.gap_dollar,
+        "gap_basis": candidate.gap_basis,
+        "volume": candidate.volume,
+        "rel_volume": candidate.rel_volume,
+        "confidence": candidate.confidence,
+        "cap_tier": candidate.cap_tier,
+        "abnormal_move": candidate.abnormal_move,
+        "consecutive_days_direction": candidate.consecutive_days_direction,
+        "has_catalyst": candidate.has_catalyst,
+        "score": candidate.score,
+        "grade": candidate.grade,
+        "matched_signals": candidate.matched_signals,
+        "missing_fields": missing_fields,
+        "risk_notes": candidate.risk_notes,
+        "sources": candidate.sources,
+        "evidence": _small_cap_evidence_to_dict(candidate.evidence),
+        "timestamp": candidate.timestamp,
+    }
+
+
+def _intraday_bar_to_dict(bar: IntradayBar) -> dict[str, Any]:
+    return {
+        "ticker": bar.ticker,
+        "timestamp": bar.timestamp,
+        "open": bar.open,
+        "high": bar.high,
+        "low": bar.low,
+        "close": bar.close,
+        "volume": bar.volume,
+        "timeframe": bar.timeframe,
+    }
+
+
+def _breitstein_entry_signal_to_dict(signal: BreitsteinEntrySignal) -> dict[str, Any]:
+    return {
+        "ticker": signal.ticker,
+        "direction": signal.direction,
+        "entry_price": signal.entry_price,
+        "stop_price": signal.stop_price,
+        "target_price": signal.target_price,
+        "prior_bar_high": signal.prior_bar_high,
+        "prior_bar_low": signal.prior_bar_low,
+        "vwap": signal.vwap,
+        "vwap_filter_passed": signal.vwap_filter_passed,
+        "volume_2x_confirmed": signal.volume_2x_confirmed,
+        "consecutive_bars": signal.consecutive_bars,
+        "rate_of_change": signal.rate_of_change,
+        "bollinger_width": signal.bollinger_width,
+        "timestamp": signal.timestamp,
+        "confidence": signal.confidence,
+        "missing_fields": list(signal.missing_fields),
+    }
+
+
+def _first_red_day_signal_to_dict(signal: FirstRedDaySignal) -> dict[str, Any]:
+    return {
+        "ticker": signal.ticker,
+        "consecutive_green_days": signal.consecutive_green_days,
+        "breakdown_reference_price": signal.breakdown_reference_price,
+        "risk_reference_price": signal.risk_reference_price,
+        "prior_day_close": signal.prior_day_close,
+        "hod_before_breakdown": signal.hod_before_breakdown,
+        "breakdown_bar_low": signal.breakdown_bar_low,
+        "vwap": signal.vwap,
+        "vwap_filter_passed": signal.vwap_filter_passed,
+        "timestamp": signal.timestamp,
+        "source": signal.source,
+        "fetched_at": signal.fetched_at,
+        "confidence": signal.confidence,
+        "missing_fields": list(signal.missing_fields),
+        "notes": list(signal.notes),
+    }
+
+
+def _first_red_day_error_to_dict(ticker: str, exc: Exception) -> dict[str, Any]:
+    return {
+        "ticker": ticker.upper(),
+        "confidence": "ERROR",
+        "missing_fields": ["bar_data"],
+        "error": str(exc),
+        "timestamp": utc_now_iso(),
+        "notes": [
+            "First red day scan failed for this ticker; no signal was inferred."
+        ],
+    }
+
+
 def scan_premarket(
     *,
     universe: str | None = None,
@@ -207,6 +309,7 @@ def scan_small_caps(
     market: str | None = None,
     market_limit: int | None = None,
     max_workers: int | None = None,
+    refresh_catalysts: bool = False,
     service: Any | None = None,
 ) -> dict[str, Any]:
     """Run the small-cap scanner and return JSON-safe candidates."""
@@ -219,7 +322,17 @@ def scan_small_caps(
     if scanner is None:
         from services.small_cap_scanner_service import SmallCapScannerService
 
-        scanner = SmallCapScannerService()
+        if refresh_catalysts:
+            from providers.news_provider import RSSNewsProvider
+            from services.small_cap_evidence_service import SmallCapEvidenceService
+
+            scanner = SmallCapScannerService(
+                evidence_service=SmallCapEvidenceService(
+                    news_provider=RSSNewsProvider(),
+                )
+            )
+        else:
+            scanner = SmallCapScannerService()
 
     try:
         output = scanner.scan(
@@ -235,6 +348,16 @@ def scan_small_caps(
     except KeyError as exc:
         return {"error": str(exc)}
 
+    notes = list(output.notes)
+    if refresh_catalysts and service is None:
+        notes.insert(
+            0,
+            (
+                "Live catalyst RSS refresh enabled for candidate enrichment; "
+                "missing catalysts remain unknown."
+            ),
+        )
+
     return {
         "preset": output.preset,
         "run_ids": output.run_ids,
@@ -242,8 +365,207 @@ def scan_small_caps(
         "candidates": [
             _small_cap_candidate_to_dict(candidate) for candidate in output.candidates
         ],
+        "notes": notes,
+    }
+
+
+def scan_breitstein(
+    *,
+    preset_name: str = "breitstein_mean_reversion_v0",
+    universe: str | list[str] | None = None,
+    watchlist: str | list[str] | None = None,
+    tickers: list[str] | str | None = None,
+    all_universes: bool = False,
+    market: str | None = None,
+    market_limit: int | None = None,
+    max_workers: int | None = None,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    """Run the Lance Breitstein Phase 1 underlying scanner."""
+    scanner = service
+    if scanner is None:
+        from services.breitstein_scanner_service import BreitsteinScannerService
+
+        scanner = BreitsteinScannerService()
+
+    try:
+        output = scanner.scan(
+            preset_name=preset_name,
+            universe=universe,
+            watchlist=watchlist,
+            tickers=tickers,
+            all_universes=all_universes,
+            market=market,
+            market_limit=market_limit,
+            max_workers=max_workers,
+        )
+    except (KeyError, ValueError) as exc:
+        return {"error": str(exc)}
+
+    return {
+        "preset": output.preset,
+        "run_ids": output.run_ids,
+        "phase": output.phase,
+        "candidate_count": output.candidate_count,
+        "candidates": [
+            _breitstein_candidate_to_dict(candidate)
+            for candidate in output.candidates
+        ],
         "notes": output.notes,
     }
+
+
+def explain_breitstein_ticker(
+    *,
+    ticker: str,
+    snapshot_service: SnapshotService | None = None,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    """Return a moment-wise Lance Desk explanation for one ticker."""
+    if not ticker or not ticker.strip():
+        return {"error": "ticker is required."}
+
+    snapshot = get_ticker_snapshot(
+        ticker=ticker,
+        snapshot_service=snapshot_service,
+    )
+    if "error" in snapshot:
+        return snapshot
+
+    scan_output = scan_breitstein(
+        tickers=ticker.strip().upper(),
+        service=service,
+    )
+    if "error" in scan_output:
+        return scan_output
+
+    from services.desk_explainer import build_breitstein_ticker_explanation
+
+    return build_breitstein_ticker_explanation(
+        snapshot=snapshot,
+        scan_output=scan_output,
+    )
+
+
+def scan_breitstein_intraday(
+    *,
+    tickers: list[str],
+    service: Any | None = None,
+) -> dict[str, Any]:
+    """Run Lance Phase 2 intraday bar analysis over explicit tickers."""
+    if not tickers:
+        return {"error": "tickers is required and must be non-empty."}
+
+    if service is None:
+        from services.intraday_analysis_service import IntradayAnalysisService
+
+        service = IntradayAnalysisService()
+
+    signals = []
+    for ticker in tickers:
+        try:
+            series = service.fetch_bars(ticker)
+            vwap = service.compute_vwap(series)
+            signal = service.detect_entry_signal(series, vwap)
+            if signal is not None:
+                signals.append(signal)
+        except Exception:
+            signals.append(
+                BreitsteinEntrySignal(
+                    ticker=ticker,
+                    direction="unknown",
+                    entry_price=None,
+                    stop_price=None,
+                    target_price=None,
+                    prior_bar_high=None,
+                    prior_bar_low=None,
+                    vwap=None,
+                    vwap_filter_passed=None,
+                    volume_2x_confirmed=None,
+                    consecutive_bars=None,
+                    rate_of_change=None,
+                    bollinger_width=None,
+                    timestamp=utc_now_iso(),
+                    confidence="ERROR",
+                    missing_fields=["bar_data"],
+                )
+            )
+
+    return {
+        "ticker_count": len(tickers),
+        "signal_count": len(signals),
+        "signals": [_breitstein_entry_signal_to_dict(signal) for signal in signals],
+        "notes": [
+            "Intraday levels are rule-derived scanner references, not execution advice."
+        ],
+    }
+
+
+def scan_temiz_first_red_day(
+    *,
+    tickers: list[str],
+    service: Any | None = None,
+) -> dict[str, Any]:
+    """Run Alex Temiz first-red-day analysis over explicit tickers."""
+    if not tickers:
+        return {"error": "tickers is required and must be non-empty."}
+
+    if service is None:
+        from providers.alpaca_provider import AlpacaProvider
+        from services.temiz_analysis_service import TemizAnalysisService
+
+        service = TemizAnalysisService(provider=AlpacaProvider())
+
+    signals = []
+    errors = []
+    for ticker in tickers:
+        try:
+            signal = service.detect_first_red_day(ticker)
+            if signal is not None:
+                signals.append(_first_red_day_signal_to_dict(signal))
+        except Exception as exc:
+            errors.append(_first_red_day_error_to_dict(ticker, exc))
+
+    return {
+        "ticker_count": len(tickers),
+        "signal_count": len(signals),
+        "signals": signals,
+        "error_count": len(errors),
+        "errors": errors,
+        "notes": [
+            "First red day levels are rule-derived scanner references, not execution advice."
+        ],
+    }
+
+
+def get_trader_context(
+    *,
+    ticker: str,
+    trader_profile: str = "default",
+    include_intraday: bool = False,
+    include_daily: bool = False,
+    refresh_catalysts: bool = False,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    """Return the shared data packet trader profiles should reason from."""
+    if not ticker or not ticker.strip():
+        return {"error": "ticker is required."}
+
+    if service is None:
+        from services.trader_context_service import TraderContextService
+
+        service = TraderContextService()
+
+    try:
+        return service.build_context(
+            ticker=ticker.strip().upper(),
+            trader_profile=trader_profile,
+            include_intraday=include_intraday,
+            include_daily=include_daily,
+            refresh_catalysts=refresh_catalysts,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
 
 
 def list_universes(*, service: UniverseService | None = None) -> dict[str, Any]:

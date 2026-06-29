@@ -5,6 +5,8 @@ All offline. Tools run against injected fake providers.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from agent_tools import definitions, tools
 from app.models import ProviderPriceData, utc_now_iso
 from services.scanner_service import ScannerService
@@ -163,6 +165,48 @@ def test_scan_small_caps_tool_accepts_market_selection():
     assert out["notes"] == ["market universe us-listed"]
 
 
+def test_scan_small_caps_tool_can_opt_into_live_catalyst_refresh(monkeypatch):
+    from app.models import SmallCapScanOutput
+    from providers import news_provider as news_module
+    from services import small_cap_evidence_service as evidence_module
+    from services import small_cap_scanner_service as scanner_module
+
+    calls = {"rss": 0, "evidence": 0, "scanner": 0}
+
+    class FakeRSSNewsProvider:
+        def __init__(self):
+            calls["rss"] += 1
+
+    class FakeEvidenceService:
+        def __init__(self, news_provider):
+            calls["evidence"] += 1
+            assert isinstance(news_provider, FakeRSSNewsProvider)
+
+    class FakeScannerService:
+        def __init__(self, evidence_service):
+            calls["scanner"] += 1
+            assert isinstance(evidence_service, FakeEvidenceService)
+
+        def scan(self, **kwargs):
+            return SmallCapScanOutput(
+                preset=kwargs["preset_name"],
+                run_ids=[],
+                candidate_count=0,
+                candidates=[],
+                notes=["scan note"],
+            )
+
+    monkeypatch.setattr(news_module, "RSSNewsProvider", FakeRSSNewsProvider)
+    monkeypatch.setattr(evidence_module, "SmallCapEvidenceService", FakeEvidenceService)
+    monkeypatch.setattr(scanner_module, "SmallCapScannerService", FakeScannerService)
+
+    out = tools.scan_small_caps(tickers="HOT", refresh_catalysts=True)
+
+    assert calls == {"rss": 1, "evidence": 1, "scanner": 1}
+    assert out["candidate_count"] == 0
+    assert out["notes"][0].startswith("Live catalyst RSS refresh enabled")
+
+
 def test_list_universes_tool_shape():
     out = tools.list_universes(service=UniverseService())
     assert "MAG7" in out["universes"]
@@ -176,6 +220,210 @@ def test_get_ticker_snapshot_tool():
     assert out["ticker"] == "NVDA"
     assert out["gap_pct"] == 4.0
     assert out["confidence"] == "OK"
+
+
+def test_explain_breitstein_ticker_tool_returns_moment_view():
+    class FakeBreitsteinService:
+        def scan(self, **kwargs):
+            assert kwargs["tickers"] == "MRVL"
+            return SimpleNamespace(
+                preset=kwargs["preset_name"],
+                run_ids=["run-1"],
+                phase="1",
+                candidate_count=0,
+                candidates=[],
+                notes=["Phase 1 underlying watchlist only."],
+            )
+
+    quotes = {
+        "MRVL": ProviderPriceData(
+            ticker="MRVL",
+            source="yfinance",
+            previous_close=266.77,
+            latest_price=277.75,
+            volume=31_025_441,
+            timestamp="2026-06-29T20:00:00+00:00",
+            raw={"marketCap": 243_184_893_952, "averageVolume": 43_000_000},
+        )
+    }
+    snap_service = SnapshotService(yf_provider=FakePriceProvider(quotes))
+
+    out = tools.explain_breitstein_ticker(
+        ticker="MRVL",
+        snapshot_service=snap_service,
+        service=FakeBreitsteinService(),
+    )
+
+    assert out["ticker"] == "MRVL"
+    assert out["verdict"] == "No Phase 1 setup"
+    assert out["moment_state"] == "not_ready_data_quality"
+    assert out["data_card"]["gap_basis"] == "last_trade"
+    assert out["data_card"]["confidence"] == "STALE_DATA"
+    assert any(item["label"] == "Participation" for item in out["setup_stack"])
+
+
+def test_scan_breitstein_intraday_tool_with_injected_service():
+    from app.models import IntradayBarSeries
+
+    class FakeIntradayService:
+        def fetch_bars(self, ticker, timeframe="2Min", start="", end="", limit=100):
+            return IntradayBarSeries(
+                ticker=ticker,
+                timeframe=timeframe,
+                bars=[],
+                source="fake",
+                fetched_at=utc_now_iso(),
+            )
+
+        def compute_vwap(self, series):
+            return None
+
+        def detect_entry_signal(self, series, vwap):
+            return None
+
+    out = tools.scan_breitstein_intraday(
+        tickers=["MRVL"], service=FakeIntradayService()
+    )
+
+    assert out["ticker_count"] == 1
+    assert out["signal_count"] == 0
+    assert out["signals"] == []
+    assert out["notes"]
+
+
+def test_scan_breitstein_intraday_tool_returns_signal():
+    from app.models import BreitsteinEntrySignal
+
+    class FakeIntradayServiceWithSignal:
+        def fetch_bars(self, ticker, timeframe="2Min", start="", end="", limit=100):
+            return SimpleNamespace(ticker=ticker, timeframe=timeframe, bars=[])
+
+        def compute_vwap(self, series):
+            return 108.0
+
+        def detect_entry_signal(self, series, vwap):
+            return BreitsteinEntrySignal(
+                ticker=series.ticker,
+                direction="long",
+                entry_price=109.0,
+                stop_price=106.0,
+                target_price=None,
+                prior_bar_high=108.0,
+                prior_bar_low=106.0,
+                vwap=vwap,
+                vwap_filter_passed=True,
+                volume_2x_confirmed=True,
+                consecutive_bars=-3,
+                rate_of_change=-1.0,
+                bollinger_width=2.5,
+                timestamp="2026-06-29T14:08:00Z",
+                confidence="OK",
+            )
+
+    out = tools.scan_breitstein_intraday(
+        tickers=["MRVL"], service=FakeIntradayServiceWithSignal()
+    )
+
+    assert out["signal_count"] == 1
+    assert out["signals"][0]["ticker"] == "MRVL"
+    assert out["signals"][0]["direction"] == "long"
+    assert out["signals"][0]["entry_price"] == 109.0
+    assert out["signals"][0]["stop_price"] == 106.0
+
+
+def test_scan_breitstein_intraday_tool_requires_tickers():
+    out = tools.scan_breitstein_intraday(tickers=[])
+    assert "error" in out
+
+
+def test_scan_temiz_first_red_day_tool_returns_reference_signal():
+    from app.models import FirstRedDaySignal
+
+    class FakeTemizService:
+        def detect_first_red_day(self, ticker):
+            return FirstRedDaySignal(
+                ticker=ticker,
+                consecutive_green_days=3,
+                breakdown_reference_price=13.0,
+                risk_reference_price=14.0,
+                prior_day_close=13.0,
+                hod_before_breakdown=14.0,
+                breakdown_bar_low=12.5,
+                vwap=13.4,
+                vwap_filter_passed=True,
+                timestamp="2026-06-29T14:08:00Z",
+                source="fake-bars",
+                fetched_at="2026-06-29T14:10:00Z",
+                confidence="OK",
+                notes=["reference only"],
+            )
+
+    out = tools.scan_temiz_first_red_day(
+        tickers=["HOT"], service=FakeTemizService()
+    )
+
+    assert out["ticker_count"] == 1
+    assert out["signal_count"] == 1
+    assert out["error_count"] == 0
+    assert out["signals"][0]["ticker"] == "HOT"
+    assert out["signals"][0]["breakdown_reference_price"] == 13.0
+    assert out["signals"][0]["risk_reference_price"] == 14.0
+    assert out["signals"][0]["source"] == "fake-bars"
+    assert out["notes"]
+
+
+def test_scan_temiz_first_red_day_tool_surfaces_ticker_errors():
+    class RaisingTemizService:
+        def detect_first_red_day(self, ticker):
+            raise RuntimeError("bars unavailable")
+
+    out = tools.scan_temiz_first_red_day(
+        tickers=["HOT"], service=RaisingTemizService()
+    )
+
+    assert out["signal_count"] == 0
+    assert out["error_count"] == 1
+    assert out["errors"][0]["ticker"] == "HOT"
+    assert out["errors"][0]["confidence"] == "ERROR"
+    assert out["errors"][0]["missing_fields"] == ["bar_data"]
+    assert "bars unavailable" in out["errors"][0]["error"]
+
+
+def test_scan_temiz_first_red_day_tool_requires_tickers():
+    out = tools.scan_temiz_first_red_day(tickers=[])
+    assert "error" in out
+
+
+def test_get_trader_context_tool_with_injected_service():
+    class FakeTraderContextService:
+        def build_context(self, **kwargs):
+            assert kwargs["ticker"] == "HOT"
+            assert kwargs["trader_profile"] == "timothy_sykes"
+            assert kwargs["include_intraday"] is True
+            assert kwargs["include_daily"] is True
+            assert kwargs["refresh_catalysts"] is False
+            return {
+                "ticker": "HOT",
+                "trader_profile": "timothy_sykes",
+                "snapshot": {"confidence": "OK"},
+                "missing_fields": [],
+            }
+
+    out = tools.get_trader_context(
+        ticker="HOT",
+        trader_profile="timothy_sykes",
+        include_intraday=True,
+        include_daily=True,
+        service=FakeTraderContextService(),
+    )
+
+    assert out["ticker"] == "HOT"
+    assert out["snapshot"]["confidence"] == "OK"
+
+
+def test_get_trader_context_tool_requires_ticker():
+    out = tools.get_trader_context(ticker="")
+    assert "error" in out
 
 
 def test_get_ticker_snapshot_uses_configured_providers(monkeypatch):
@@ -243,6 +491,11 @@ def test_tool_definitions_are_well_formed():
     assert names == {
         "scan_premarket",
         "scan_small_caps",
+        "scan_breitstein",
+        "explain_breitstein_ticker",
+        "scan_breitstein_intraday",
+        "scan_temiz_first_red_day",
+        "get_trader_context",
         "list_universes",
         "get_ticker_snapshot",
     }
@@ -255,3 +508,22 @@ def test_tool_definitions_are_well_formed():
     assert "market" in small_cap_tool["input_schema"]["properties"]
     assert "market_limit" in small_cap_tool["input_schema"]["properties"]
     assert "max_workers" in small_cap_tool["input_schema"]["properties"]
+    assert "refresh_catalysts" in small_cap_tool["input_schema"]["properties"]
+
+    breitstein_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "scan_breitstein")
+    assert "watchlist" in breitstein_tool["input_schema"]["properties"]
+    assert "market" in breitstein_tool["input_schema"]["properties"]
+    assert "market_limit" in breitstein_tool["input_schema"]["properties"]
+    assert "max_workers" in breitstein_tool["input_schema"]["properties"]
+
+    explain_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "explain_breitstein_ticker")
+    assert explain_tool["input_schema"]["required"] == ["ticker"]
+
+    intraday_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "scan_breitstein_intraday")
+    assert intraday_tool["input_schema"]["required"] == ["tickers"]
+
+    temiz_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "scan_temiz_first_red_day")
+    assert temiz_tool["input_schema"]["required"] == ["tickers"]
+
+    context_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "get_trader_context")
+    assert context_tool["input_schema"]["required"] == ["ticker"]

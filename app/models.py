@@ -18,6 +18,7 @@ Confidence = Literal[
 
 Direction = Literal["up", "down", "both"]
 SmallCapGrade = Literal["A_WATCH", "B_WATCH", "C_WATCH", "REJECT"]
+BreitsteinGrade = Literal["A_WATCH", "B_WATCH", "C_WATCH", "REJECT"]
 
 
 def utc_now_iso() -> str:
@@ -251,6 +252,41 @@ class SmallCapEvidence:
 
 
 @dataclass
+class BreitsteinCandidate:
+    ticker: str
+    name: str | None
+    market_cap: float | None
+    gap_pct: float | None
+    gap_dollar: float | None
+    volume: float | None
+    rel_volume: float | None
+    confidence: Confidence
+    gap_basis: str | None
+    cap_tier: str | None
+    abnormal_move: bool | None
+    consecutive_days_direction: int | None
+    has_catalyst: bool | None
+    score: int = 0
+    grade: BreitsteinGrade = "REJECT"
+    matched_signals: list[str] = field(default_factory=list)
+    missing_fields: list[str] = field(default_factory=list)
+    risk_notes: list[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    evidence: SmallCapEvidence | None = None
+    timestamp: str | None = None
+
+
+@dataclass
+class BreitsteinScanOutput:
+    preset: str
+    run_ids: list[str]
+    candidate_count: int
+    candidates: list[BreitsteinCandidate]
+    phase: str = "1"
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
 class SmallCapCandidate:
     ticker: str
     name: str | None
@@ -291,6 +327,66 @@ class ScanRunOutput:
     notes: list[str] = field(default_factory=list)
 
 
+@dataclass
+class IntradayBar:
+    ticker: str
+    timestamp: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    timeframe: str = "2Min"
+
+
+@dataclass
+class IntradayBarSeries:
+    ticker: str
+    timeframe: str
+    bars: list[IntradayBar]
+    source: str
+    fetched_at: str
+
+
+@dataclass
+class BreitsteinEntrySignal:
+    ticker: str
+    direction: str
+    entry_price: float | None
+    stop_price: float | None
+    target_price: float | None
+    prior_bar_high: float | None
+    prior_bar_low: float | None
+    vwap: float | None
+    vwap_filter_passed: bool | None
+    volume_2x_confirmed: bool | None
+    consecutive_bars: int | None
+    rate_of_change: float | None
+    bollinger_width: float | None
+    timestamp: str
+    confidence: str
+    missing_fields: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FirstRedDaySignal:
+    ticker: str
+    consecutive_green_days: int
+    breakdown_reference_price: float | None
+    risk_reference_price: float | None
+    prior_day_close: float | None
+    hod_before_breakdown: float | None
+    breakdown_bar_low: float | None
+    vwap: float | None
+    vwap_filter_passed: bool | None
+    timestamp: str
+    source: str | None
+    fetched_at: str | None
+    confidence: str
+    missing_fields: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
 class PriceProvider(Protocol):
     source_name: str
 
@@ -302,4 +398,18 @@ class ProfileProvider(Protocol):
     source_name: str
 
     def get_profile(self, ticker: str) -> AssetProfile | None:
+        ...
+
+
+class BarProvider(Protocol):
+    source_name: str
+
+    def get_bars(
+        self,
+        ticker: str,
+        timeframe: str = "2Min",
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 100,
+    ) -> IntradayBarSeries:
         ...

@@ -144,12 +144,204 @@ TOOLS: list[dict[str, Any]] = [
                         "Use a modest value to improve live scan latency without changing data rules."
                     ),
                 },
+                "refresh_catalysts": {
+                    "type": "boolean",
+                    "description": (
+                        "Opt in to live RSS catalyst lookup for candidates before "
+                        "evidence scoring. Defaults to false; missing catalysts "
+                        "remain unknown."
+                    ),
+                },
                 "all_universes": {
                     "type": "boolean",
                     "description": "Scan every defined universe. Defaults to false.",
                 },
             },
             "required": [],
+        },
+    },
+    {
+        "name": "scan_breitstein",
+        "description": (
+            "Run the Lance Breitstein-style Phase 1 underlying scanner over a "
+            "watchlist, universe, explicit tickers, or market universe. It "
+            "surfaces abnormal move / high-RVOL mean-reversion candidates only; "
+            "Phase 1 does not produce entries, exits, targets, sizing, or advice."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "preset_name": {
+                    "type": "string",
+                    "description": (
+                        "Breitstein scanner preset name. Defaults to "
+                        "breitstein_mean_reversion_v0."
+                    ),
+                },
+                "universe": {
+                    "type": "string",
+                    "description": "Universe name(s), comma-separated.",
+                },
+                "watchlist": {
+                    "type": "string",
+                    "description": (
+                        "Watchlist name(s), comma-separated. Defaults to "
+                        "HOT_ACTIVE when no selection is provided."
+                    ),
+                },
+                "tickers": {
+                    "type": "string",
+                    "description": "Explicit tickers, comma-separated.",
+                },
+                "market": {
+                    "type": "string",
+                    "enum": ["us-listed"],
+                    "description": (
+                        "Whole-market source to scan before Breitstein filters. "
+                        "Use 'us-listed' for the filtered US-listed common-stock "
+                        "universe."
+                    ),
+                },
+                "market_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Optional cap on the number of market symbols to scan. "
+                        "Use only for smoke tests; omit for the full market."
+                    ),
+                },
+                "max_workers": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Optional bounded worker count for broad market scans. "
+                        "Use a modest value to improve live scan latency without "
+                        "changing data rules."
+                    ),
+                },
+                "all_universes": {
+                    "type": "boolean",
+                    "description": "Scan every defined universe. Defaults to false.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "explain_breitstein_ticker",
+        "description": (
+            "Return a grounded, moment-wise Lance Breitstein Desk explanation "
+            "for one ticker. Use this when the user asks what Lance thinks of a "
+            "specific stock or why a ticker did/did not qualify. The output "
+            "includes data quality, setup stack, missing fields, and next-needed "
+            "checks; it is not buy/sell advice."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "The ticker symbol, e.g. 'MRVL'.",
+                },
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
+        "name": "scan_breitstein_intraday",
+        "description": (
+            "Run Lance Breitstein-style Phase 2 intraday bar analysis over "
+            "explicit tickers and return rule-derived reference levels from "
+            "the 2-minute bar data. These are scanner facts for review, not "
+            "buy/sell advice, price targets, sizing, or order instructions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tickers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "description": (
+                        "Ticker symbols to analyze with the intraday bar rules, "
+                        "e.g. ['MRVL', 'HOOD']."
+                    ),
+                },
+            },
+            "required": ["tickers"],
+        },
+    },
+    {
+        "name": "scan_temiz_first_red_day",
+        "description": (
+            "Run Alex Temiz-style first-red-day analysis over explicit tickers. "
+            "It checks a 3+ day green run, prior-day-close breakdown, VWAP filter, "
+            "and high-of-day risk reference from bar data. Returned levels are "
+            "rule-derived scanner references, not buy/sell advice, price targets, "
+            "sizing, or order instructions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tickers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "description": (
+                        "Ticker symbols to analyze with first-red-day rules, "
+                        "e.g. ['HOT', 'MOMO']."
+                    ),
+                },
+            },
+            "required": ["tickers"],
+        },
+    },
+    {
+        "name": "get_trader_context",
+        "description": (
+            "Build the shared read-only trader context packet for one ticker. "
+            "Use this before asking a trader profile to reason about a name. "
+            "The packet carries snapshot data, evidence/news/filings/float, "
+            "optional intraday EMA/VWAP, optional daily pivots, sources, "
+            "timestamps, confidence, and missing fields. It is not advice."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "Ticker symbol, e.g. 'MRVL'.",
+                },
+                "trader_profile": {
+                    "type": "string",
+                    "description": (
+                        "Trader profile key for context labeling, e.g. "
+                        "'timothy_sykes', 'lance_breitstein', or 'alex_temiz'."
+                    ),
+                },
+                "include_intraday": {
+                    "type": "boolean",
+                    "description": (
+                        "Include intraday bar-derived VWAP and EMA context when "
+                        "bar data is available. Defaults to false."
+                    ),
+                },
+                "include_daily": {
+                    "type": "boolean",
+                    "description": (
+                        "Include daily bar-derived support/resistance pivots when "
+                        "bar data is available. Defaults to false."
+                    ),
+                },
+                "refresh_catalysts": {
+                    "type": "boolean",
+                    "description": (
+                        "Opt in to live RSS catalyst lookup during evidence "
+                        "enrichment. Defaults to false."
+                    ),
+                },
+            },
+            "required": ["ticker"],
         },
     },
     {
@@ -189,6 +381,11 @@ TOOLS: list[dict[str, Any]] = [
 _DISPATCH: dict[str, Callable[..., dict[str, Any]]] = {
     "scan_premarket": tools.scan_premarket,
     "scan_small_caps": tools.scan_small_caps,
+    "scan_breitstein": tools.scan_breitstein,
+    "explain_breitstein_ticker": tools.explain_breitstein_ticker,
+    "scan_breitstein_intraday": tools.scan_breitstein_intraday,
+    "scan_temiz_first_red_day": tools.scan_temiz_first_red_day,
+    "get_trader_context": tools.get_trader_context,
     "list_universes": tools.list_universes,
     "get_ticker_snapshot": tools.get_ticker_snapshot,
 }
