@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from app.db import (
@@ -8,7 +9,14 @@ from app.db import (
     get_runner_history,
     insert_news_event,
 )
-from app.models import AssetProfile, FilingEvent, SmallCapCandidate, SmallCapEvidence
+from app.models import (
+    AssetProfile,
+    CatalystEvent,
+    FilingEvent,
+    SmallCapCandidate,
+    SmallCapEvidence,
+    utc_now_iso,
+)
 from providers.sec_provider import SECProvider
 from services.profile_service import ProfileService
 from services.scanner_service import compute_float_rotation
@@ -23,6 +31,7 @@ class SmallCapEvidenceService:
         news_provider: Any | None = None,
         db_path: str | None = None,
         low_float_threshold: float = 10_000_000,
+        now_fn: Any | None = None,
     ) -> None:
         self.profile_service = (
             profile_service
@@ -33,6 +42,7 @@ class SmallCapEvidenceService:
         self.news_provider = news_provider
         self.db_path = db_path
         self.low_float_threshold = low_float_threshold
+        self.now_fn = now_fn or utc_now_iso
         self._profile_error_by_ticker: dict[str, str] = {}
         self._filing_error_by_ticker: dict[str, str] = {}
         self._news_error_by_ticker: dict[str, str] = {}
@@ -82,6 +92,7 @@ class SmallCapEvidenceService:
             )
 
         if catalysts:
+            _apply_catalyst_recency(catalysts, self.now_fn())
             evidence.catalysts = catalysts
             evidence.missing_fields = [
                 field for field in evidence.missing_fields if field != "catalyst"
@@ -225,3 +236,27 @@ class SmallCapEvidenceService:
 def _append_unique(values: list[str], value: str) -> None:
     if value not in values:
         values.append(value)
+
+
+def _apply_catalyst_recency(catalysts: list[CatalystEvent], now_iso: str) -> None:
+    now = _parse_iso(now_iso)
+    if now is None:
+        return
+    for catalyst in catalysts:
+        published = _parse_iso(catalyst.published_at)
+        if published is None:
+            catalyst.recency_minutes = None
+            continue
+        catalyst.recency_minutes = round((now - published).total_seconds() / 60)
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

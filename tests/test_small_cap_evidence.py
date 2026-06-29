@@ -443,6 +443,22 @@ def test_evidence_service_fetches_and_caches_news_when_cache_empty(tmp_path):
     assert cached[0].headline == "HOT announces FDA clearance"
 
 
+def test_evidence_service_derives_catalyst_recency_minutes(tmp_path):
+    db_path = tmp_path / "evidence.sqlite"
+    service = SmallCapEvidenceService(
+        profile_service=FakeProfileService(),
+        filing_provider=None,
+        news_provider=FakeNewsProvider(),
+        db_path=str(db_path),
+        now_fn=lambda: "2026-06-29T12:30:00Z",
+    )
+
+    enriched = service.enrich_candidates([_candidate()])[0]
+
+    assert enriched.evidence is not None
+    assert enriched.evidence.catalysts[0].recency_minutes == 30
+
+
 def test_evidence_service_surfaces_news_provider_failure_as_unknown(tmp_path):
     service = SmallCapEvidenceService(
         profile_service=FakeProfileService(),
