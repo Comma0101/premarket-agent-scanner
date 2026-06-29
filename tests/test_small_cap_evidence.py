@@ -9,11 +9,11 @@ from app.db import (
 from app.models import (
     AssetProfile,
     CatalystEvent,
-    FilingEvent,
     FormerRunnerEvent,
     SmallCapCandidate,
     SmallCapEvidence,
 )
+from providers.sec_provider import FilingEvent, classify_filing_risk
 from services.small_cap_evidence_service import SmallCapEvidenceService
 
 
@@ -203,6 +203,21 @@ class RaisingProfileService:
         raise RuntimeError("profile offline")
 
 
+class FakeFilingProvider:
+    def get_recent_filings(self, ticker: str):
+        return [
+            FilingEvent(
+                ticker=ticker,
+                form_type="S-1",
+                filed_at="2026-06-27",
+                accession_number="0000000000-26-000002",
+                description="Securities registration statement",
+                source_url="https://www.sec.gov/Archives/example",
+                risk_tags=["offering"],
+            )
+        ]
+
+
 def _candidate(ticker="HOT"):
     return SmallCapCandidate(
         ticker=ticker,
@@ -255,3 +270,22 @@ def test_evidence_service_keeps_float_unknown_when_profile_lookup_fails():
         "profile lookup" in note or "profile offline" in note
         for note in enriched.evidence.risk_notes
     )
+
+
+def test_classify_filing_risk_tags_offering_forms():
+    assert classify_filing_risk("S-1", "Registration statement") == ["offering"]
+    assert classify_filing_risk("8-K", "Entry into a Material Definitive Agreement") == []
+
+
+def test_evidence_service_attaches_recent_filings_and_removes_missing_field():
+    service = SmallCapEvidenceService(
+        profile_service=FakeProfileService(),
+        filing_provider=FakeFilingProvider(),
+    )
+
+    enriched = service.enrich_candidates([_candidate()])[0]
+
+    assert enriched.evidence is not None
+    assert enriched.evidence.filings[0].form_type == "S-1"
+    assert "filings" not in enriched.evidence.missing_fields
+    assert any("offering" in note.lower() for note in enriched.evidence.risk_notes)
