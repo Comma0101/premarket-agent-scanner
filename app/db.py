@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS ticker_news (
     url TEXT,
     summary TEXT,
     confidence TEXT NOT NULL DEFAULT 'UNKNOWN',
+    catalyst_quality TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -167,6 +168,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE scanner_results ADD COLUMN gap_dollar REAL")
     if "gap_basis" not in columns:
         conn.execute("ALTER TABLE scanner_results ADD COLUMN gap_basis TEXT")
+    news_columns = {row[1] for row in conn.execute("PRAGMA table_info(ticker_news)")}
+    if "catalyst_quality" not in news_columns:
+        conn.execute("ALTER TABLE ticker_news ADD COLUMN catalyst_quality TEXT")
 
 
 def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
@@ -393,6 +397,7 @@ def insert_news_event(db_path: str | Path | None, event: CatalystEvent) -> None:
                     url = ?,
                     summary = ?,
                     confidence = ?,
+                    catalyst_quality = ?,
                     updated_at = ?
                 WHERE rowid = ?
                 """,
@@ -403,6 +408,7 @@ def insert_news_event(db_path: str | Path | None, event: CatalystEvent) -> None:
                     url,
                     event.summary,
                     event.confidence,
+                    event.catalyst_quality,
                     updated_at,
                     row_id,
                 ),
@@ -433,9 +439,10 @@ def insert_news_event(db_path: str | Path | None, event: CatalystEvent) -> None:
         conn.execute(
             """
             INSERT INTO ticker_news (
-                ticker, headline, published_at, source, url, summary, confidence, updated_at
+                ticker, headline, published_at, source, url, summary, confidence,
+                catalyst_quality, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ticker,
@@ -445,6 +452,7 @@ def insert_news_event(db_path: str | Path | None, event: CatalystEvent) -> None:
                 url,
                 event.summary,
                 event.confidence,
+                event.catalyst_quality,
                 updated_at,
             ),
         )
@@ -481,6 +489,7 @@ def get_cached_news(
             url=row["url"],
             summary=row["summary"],
             confidence=row["confidence"],
+            catalyst_quality=row["catalyst_quality"],
         )
         for row in rows
     ]

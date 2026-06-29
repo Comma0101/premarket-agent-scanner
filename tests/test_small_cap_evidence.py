@@ -52,6 +52,7 @@ def test_evidence_cache_round_trips_filings_news_and_runner_history(tmp_path):
             url="https://example.test/hot",
             summary="Contract headline",
             confidence="OK",
+            catalyst_quality="hard",
         ),
     )
     insert_runner_event(
@@ -73,6 +74,8 @@ def test_evidence_cache_round_trips_filings_news_and_runner_history(tmp_path):
     assert filings[0].form_type == "S-1"
     assert filings[0].risk_tags == ["offering"]
     assert news[0].headline == "HOT announces contract"
+    assert news[0].catalyst_quality == "hard"
+    assert news[0].recency_minutes is None
     assert runners[0].max_gap_pct == 180.0
 
 

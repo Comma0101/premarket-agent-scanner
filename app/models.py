@@ -218,6 +218,8 @@ class CatalystEvent:
     url: str | None = None
     summary: str | None = None
     confidence: str = "UNKNOWN"
+    catalyst_quality: str | None = None
+    recency_minutes: float | None = None
 
 
 @dataclass
