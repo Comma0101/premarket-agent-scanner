@@ -19,23 +19,44 @@ class DeskRunService:
         self,
         *,
         context_service: Any | None = None,
+        universe_service: Any | None = None,
+        small_cap_service: Any | None = None,
         bar_provider: Any | None = None,
     ) -> None:
         self.context_service = context_service
+        self.universe_service = universe_service
+        self.small_cap_service = small_cap_service
         self.bar_provider = bar_provider
 
     def run(
         self,
         *,
-        tickers: list[str],
+        tickers: list[str] | None,
+        universe: str | list[str] | None = None,
+        watchlist: str | list[str] | None = None,
+        all_universes: bool = False,
+        market: str | None = None,
+        market_limit: int | None = None,
+        max_workers: int | None = None,
+        scan_preset_name: str = "sykes_small_cap_v0",
         trader_profiles: list[str] | None = None,
         include_intraday: bool = False,
         include_daily: bool = False,
         refresh_catalysts: bool = False,
     ) -> dict[str, Any]:
-        normalized_tickers = _normalize_tickers(tickers)
-        if not normalized_tickers:
-            raise ValueError("tickers is required and must be non-empty.")
+        selection = self._resolve_selection(
+            tickers=tickers,
+            universe=universe,
+            watchlist=watchlist,
+            all_universes=all_universes,
+            market=market,
+            market_limit=market_limit,
+            max_workers=max_workers,
+            scan_preset_name=scan_preset_name,
+        )
+        normalized_tickers = selection["tickers"]
+        if not normalized_tickers and not selection["allow_empty"]:
+            raise ValueError("selection resolved no tickers.")
 
         profiles = _normalize_profiles(trader_profiles)
         context_service = self._context_service(
@@ -57,6 +78,7 @@ class DeskRunService:
         return {
             "generated_at": utc_now_iso(),
             "ticker_count": len(normalized_tickers),
+            "selection": selection["summary"],
             "trader_profiles": profiles,
             "tickers": ticker_packets,
             "notes": [
@@ -83,6 +105,96 @@ class DeskRunService:
         from services.trader_context_service import TraderContextService
 
         return TraderContextService(bar_provider=bar_provider)
+
+    def _resolve_selection(
+        self,
+        *,
+        tickers: list[str] | None,
+        universe: str | list[str] | None,
+        watchlist: str | list[str] | None,
+        all_universes: bool,
+        market: str | None,
+        market_limit: int | None,
+        max_workers: int | None,
+        scan_preset_name: str,
+    ) -> dict[str, Any]:
+        if market:
+            if any([tickers, universe, watchlist, all_universes]):
+                raise ValueError(
+                    "Use market by itself; do not combine it with universe/watchlist/tickers/all_universes."
+                )
+            return self._resolve_market_scan(
+                market=market,
+                market_limit=market_limit,
+                max_workers=max_workers,
+                scan_preset_name=scan_preset_name,
+            )
+
+        if not any([tickers, universe, watchlist, all_universes]):
+            raise ValueError(
+                "Provide at least one selection: tickers, universe, watchlist, market, or all_universes."
+            )
+
+        selection = self._universe_service().resolve_selection(
+            universe=universe,
+            watchlist=watchlist,
+            tickers=tickers,
+            all_universes=all_universes,
+        )
+        return {
+            "tickers": list(selection.tickers),
+            "allow_empty": False,
+            "summary": {
+                "source": "universe_service",
+                "label": selection.label,
+                "memberships": dict(selection.memberships),
+            },
+        }
+
+    def _resolve_market_scan(
+        self,
+        *,
+        market: str,
+        market_limit: int | None,
+        max_workers: int | None,
+        scan_preset_name: str,
+    ) -> dict[str, Any]:
+        output = self._small_cap_service().scan(
+            preset_name=scan_preset_name,
+            market=market,
+            market_limit=market_limit,
+            max_workers=max_workers,
+        )
+        candidates = [_candidate_summary(candidate) for candidate in output.candidates]
+        return {
+            "tickers": [candidate["ticker"] for candidate in candidates],
+            "allow_empty": True,
+            "summary": {
+                "source": "market_scan",
+                "market": market,
+                "preset": output.preset,
+                "run_ids": list(output.run_ids),
+                "candidate_count": output.candidate_count,
+                "candidates": candidates,
+                "notes": list(output.notes),
+            },
+        }
+
+    def _universe_service(self) -> Any:
+        if self.universe_service is not None:
+            return self.universe_service
+        from services.universe_service import UniverseService
+
+        self.universe_service = UniverseService()
+        return self.universe_service
+
+    def _small_cap_service(self) -> Any:
+        if self.small_cap_service is not None:
+            return self.small_cap_service
+        from services.small_cap_scanner_service import SmallCapScannerService
+
+        self.small_cap_service = SmallCapScannerService()
+        return self.small_cap_service
 
     def _ticker_packet(
         self,
@@ -141,6 +253,18 @@ def _normalize_tickers(tickers: list[str]) -> list[str]:
         normalized.append(value)
         seen.add(value)
     return normalized
+
+
+def _candidate_summary(candidate: Any) -> dict[str, Any]:
+    return {
+        "ticker": candidate.ticker,
+        "grade": getattr(candidate, "grade", None),
+        "score": getattr(candidate, "score", None),
+        "gap_basis": getattr(candidate, "gap_basis", None),
+        "confidence": getattr(candidate, "confidence", None),
+        "missing_fields": list(getattr(candidate, "missing_fields", []) or []),
+        "risk_notes": list(getattr(candidate, "risk_notes", []) or []),
+    }
 
 
 def _normalize_profiles(trader_profiles: list[str] | None) -> list[str]:

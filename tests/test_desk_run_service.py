@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from services.desk_run_service import DeskRunService
@@ -46,6 +48,62 @@ class FakeContextService:
         }
 
 
+class FakeUniverseService:
+    def resolve_selection(self, **kwargs):
+        assert kwargs["watchlist"] == "ACTIVE"
+        assert kwargs["universe"] is None
+        assert kwargs["tickers"] is None
+        assert kwargs["all_universes"] is False
+        return SimpleNamespace(
+            tickers=["MRVL", "HOOD"],
+            memberships={
+                "MRVL": ["WATCHLIST:ACTIVE"],
+                "HOOD": ["WATCHLIST:ACTIVE"],
+            },
+            label="WATCHLIST:ACTIVE",
+        )
+
+
+class FakeSmallCapCandidate:
+    def __init__(self, ticker: str, score: int) -> None:
+        self.ticker = ticker
+        self.grade = "A_WATCH"
+        self.score = score
+        self.gap_basis = "premarket"
+        self.confidence = "OK"
+        self.missing_fields = ["short_interest"]
+        self.risk_notes = []
+
+
+class FakeSmallCapService:
+    def scan(self, **kwargs):
+        assert kwargs["preset_name"] == "sykes_small_cap_v0"
+        assert kwargs["market"] == "us-listed"
+        assert kwargs["market_limit"] == 50
+        assert kwargs["max_workers"] == 4
+        return SimpleNamespace(
+            preset="sykes_small_cap_v0",
+            run_ids=["run-1"],
+            candidate_count=2,
+            candidates=[
+                FakeSmallCapCandidate("HOT", 90),
+                FakeSmallCapCandidate("COOL", 75),
+            ],
+            notes=["market scan note"],
+        )
+
+
+class FakeEmptySmallCapService:
+    def scan(self, **kwargs):
+        return SimpleNamespace(
+            preset=kwargs["preset_name"],
+            run_ids=["empty-run"],
+            candidate_count=0,
+            candidates=[],
+            notes=["no candidates"],
+        )
+
+
 def test_desk_run_builds_one_context_and_multiple_trader_views() -> None:
     context_service = FakeContextService()
     service = DeskRunService(context_service=context_service)
@@ -77,6 +135,73 @@ def test_desk_run_builds_one_context_and_multiple_trader_views() -> None:
     assert out["disclaimer"].startswith("Matches your filter")
 
 
+def test_desk_run_resolves_watchlist_selection() -> None:
+    context_service = FakeContextService()
+    service = DeskRunService(
+        context_service=context_service,
+        universe_service=FakeUniverseService(),
+    )
+
+    out = service.run(
+        tickers=None,
+        watchlist="ACTIVE",
+        trader_profiles=["lance_breitstein"],
+    )
+
+    assert out["selection"]["source"] == "universe_service"
+    assert out["selection"]["label"] == "WATCHLIST:ACTIVE"
+    assert out["selection"]["memberships"]["MRVL"] == ["WATCHLIST:ACTIVE"]
+    assert out["ticker_count"] == 2
+    assert [call["ticker"] for call in context_service.calls] == ["MRVL", "HOOD"]
+
+
+def test_desk_run_uses_market_scan_candidates_as_tickers() -> None:
+    context_service = FakeContextService()
+    service = DeskRunService(
+        context_service=context_service,
+        small_cap_service=FakeSmallCapService(),
+    )
+
+    out = service.run(
+        tickers=None,
+        market="us-listed",
+        market_limit=50,
+        max_workers=4,
+        trader_profiles=["timothy_sykes"],
+    )
+
+    assert out["selection"]["source"] == "market_scan"
+    assert out["selection"]["market"] == "us-listed"
+    assert out["selection"]["candidate_count"] == 2
+    assert out["selection"]["run_ids"] == ["run-1"]
+    assert out["selection"]["candidates"][0]["ticker"] == "HOT"
+    assert out["selection"]["notes"] == ["market scan note"]
+    assert out["ticker_count"] == 2
+    assert [call["ticker"] for call in context_service.calls] == ["HOT", "COOL"]
+
+
+def test_desk_run_market_scan_allows_zero_candidates() -> None:
+    context_service = FakeContextService()
+    service = DeskRunService(
+        context_service=context_service,
+        small_cap_service=FakeEmptySmallCapService(),
+    )
+
+    out = service.run(
+        tickers=None,
+        market="us-listed",
+        market_limit=10,
+        trader_profiles=["timothy_sykes"],
+    )
+
+    assert out["selection"]["source"] == "market_scan"
+    assert out["selection"]["candidate_count"] == 0
+    assert out["selection"]["run_ids"] == ["empty-run"]
+    assert out["ticker_count"] == 0
+    assert out["tickers"] == []
+    assert context_service.calls == []
+
+
 def test_desk_run_surfaces_per_ticker_context_errors() -> None:
     service = DeskRunService(context_service=FakeContextService())
 
@@ -93,5 +218,5 @@ def test_desk_run_surfaces_per_ticker_context_errors() -> None:
 def test_desk_run_requires_tickers() -> None:
     service = DeskRunService(context_service=FakeContextService())
 
-    with pytest.raises(ValueError, match="tickers"):
+    with pytest.raises(ValueError, match="selection"):
         service.run(tickers=[], trader_profiles=["timothy_sykes"])

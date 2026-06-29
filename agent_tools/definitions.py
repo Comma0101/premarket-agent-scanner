@@ -450,6 +450,47 @@ TOOLS: list[dict[str, Any]] = [
                         "e.g. ['MRVL', 'HOOD'] or 'MRVL,HOOD'."
                     ),
                 },
+                "universe": {
+                    "type": "string",
+                    "description": "Universe name(s), comma-separated.",
+                },
+                "watchlist": {
+                    "type": "string",
+                    "description": "Watchlist name(s), comma-separated.",
+                },
+                "all_universes": {
+                    "type": "boolean",
+                    "description": "Use every defined universe. Defaults to false.",
+                },
+                "market": {
+                    "type": "string",
+                    "enum": ["us-listed"],
+                    "description": (
+                        "Whole-market source to scan before building Desk views. "
+                        "Use 'us-listed' for filtered US-listed common stocks."
+                    ),
+                },
+                "market_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Optional cap for market scan smoke tests. Omit for full market."
+                    ),
+                },
+                "max_workers": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Optional bounded worker count for broad market scans."
+                    ),
+                },
+                "scan_preset_name": {
+                    "type": "string",
+                    "description": (
+                        "Small-cap scan preset to use when market is provided. "
+                        "Defaults to sykes_small_cap_v0."
+                    ),
+                },
                 "trader_profiles": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -481,7 +522,7 @@ TOOLS: list[dict[str, Any]] = [
                     ),
                 },
             },
-            "required": ["tickers"],
+            "required": [],
         },
     },
     {

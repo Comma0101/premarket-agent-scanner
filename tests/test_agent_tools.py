@@ -562,6 +562,10 @@ def test_run_desk_tool_returns_aggregated_views():
     class FakeDeskRunService:
         def run(self, **kwargs):
             assert kwargs["tickers"] == ["MRVL", "HOOD"]
+            assert kwargs["universe"] is None
+            assert kwargs["watchlist"] is None
+            assert kwargs["market"] is None
+            assert kwargs["all_universes"] is False
             assert kwargs["trader_profiles"] == ["lance_breitstein"]
             assert kwargs["include_intraday"] is True
             assert kwargs["include_daily"] is False
@@ -597,8 +601,26 @@ def test_run_desk_tool_returns_aggregated_views():
     assert out["tickers"][0]["ticker"] == "MRVL"
 
 
-def test_run_desk_tool_requires_tickers():
-    out = tools.run_desk(tickers=[])
+def test_run_desk_tool_accepts_watchlist_selection():
+    class FakeDeskRunService:
+        def run(self, **kwargs):
+            assert kwargs["tickers"] is None
+            assert kwargs["watchlist"] == "ACTIVE"
+            return {
+                "ticker_count": 1,
+                "selection": {"source": "universe_service", "label": "WATCHLIST:ACTIVE"},
+                "tickers": [],
+                "trader_profiles": ["timothy_sykes"],
+                "disclaimer": "Matches your filter — not buy/sell advice. Verify before acting.",
+            }
+
+    out = tools.run_desk(watchlist="ACTIVE", service=FakeDeskRunService())
+
+    assert out["selection"]["label"] == "WATCHLIST:ACTIVE"
+
+
+def test_run_desk_tool_requires_selection():
+    out = tools.run_desk()
     assert "error" in out
 
 
@@ -755,5 +777,7 @@ def test_tool_definitions_are_well_formed():
     assert explain_context_tool["input_schema"]["required"] == ["ticker"]
 
     run_desk_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "run_desk")
-    assert run_desk_tool["input_schema"]["required"] == ["tickers"]
+    assert run_desk_tool["input_schema"]["required"] == []
     assert "trader_profiles" in run_desk_tool["input_schema"]["properties"]
+    assert "watchlist" in run_desk_tool["input_schema"]["properties"]
+    assert "market" in run_desk_tool["input_schema"]["properties"]

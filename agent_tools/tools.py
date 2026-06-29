@@ -695,7 +695,14 @@ def explain_ticker_as_trader(
 
 def run_desk(
     *,
-    tickers: list[str] | str,
+    tickers: list[str] | str | None = None,
+    universe: str | list[str] | None = None,
+    watchlist: str | list[str] | None = None,
+    all_universes: bool = False,
+    market: str | None = None,
+    market_limit: int | None = None,
+    max_workers: int | None = None,
+    scan_preset_name: str = "sykes_small_cap_v0",
     trader_profiles: list[str] | None = None,
     include_intraday: bool = False,
     include_daily: bool = False,
@@ -704,8 +711,10 @@ def run_desk(
 ) -> dict[str, Any]:
     """Run one grounded Desk packet across tickers and trader profiles."""
     normalized_tickers = _normalize_ticker_list(tickers)
-    if not normalized_tickers:
-        return {"error": "tickers is required and must be non-empty."}
+    if not any([normalized_tickers, universe, watchlist, all_universes, market]):
+        return {
+            "error": "Provide at least one selection: tickers, universe, watchlist, market, or all_universes."
+        }
 
     if service is None:
         from services.desk_run_service import DeskRunService
@@ -715,6 +724,13 @@ def run_desk(
     try:
         return service.run(
             tickers=normalized_tickers,
+            universe=universe,
+            watchlist=watchlist,
+            all_universes=all_universes,
+            market=market,
+            market_limit=market_limit,
+            max_workers=max_workers,
+            scan_preset_name=scan_preset_name,
             trader_profiles=trader_profiles,
             include_intraday=include_intraday,
             include_daily=include_daily,
@@ -724,7 +740,9 @@ def run_desk(
         return {"error": str(exc)}
 
 
-def _normalize_ticker_list(tickers: list[str] | str) -> list[str]:
+def _normalize_ticker_list(tickers: list[str] | str | None) -> list[str] | None:
+    if tickers is None:
+        return None
     if isinstance(tickers, str):
         raw = tickers.split(",")
     else:
