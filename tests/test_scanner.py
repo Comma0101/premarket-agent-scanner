@@ -7,6 +7,8 @@ confidence labelling, filtering, and sorting exactly as production would.
 
 from __future__ import annotations
 
+import time
+
 from app.models import (
     AssetProfile,
     CombinedSnapshot,
@@ -39,6 +41,38 @@ class FakePriceProvider:
             return self._quotes[normalized]
         return ProviderPriceData(
             ticker=normalized, source=self.source_name, error="not_found"
+        )
+
+
+class SlowSnapshotService:
+    def __init__(self, delay: float = 0.05) -> None:
+        self.delay = delay
+
+    def build_snapshot(self, ticker: str) -> CombinedSnapshot:
+        time.sleep(self.delay)
+        return CombinedSnapshot(
+            ticker=ticker,
+            timestamp=utc_now_iso(),
+            previous_close=10.0,
+            premarket_price=11.0,
+            latest_price=11.0,
+            open_price=None,
+            high=None,
+            low=None,
+            volume=2_000_000,
+            source_primary="fake",
+            source_secondary=None,
+            confidence="OK",
+            sources=["fake"],
+            market_cap=500_000_000,
+            average_volume=500_000,
+            yfinance_data=ProviderPriceData(
+                ticker=ticker,
+                source="fake",
+                previous_close=10.0,
+                premarket_price=11.0,
+                latest_price=11.0,
+            ),
         )
 
 
@@ -97,6 +131,50 @@ def test_gap_up_filter_and_market_cap():
     assert out.results[0].gap_pct == 8.0
     assert out.results[0].gap_dollar == 8.0
     assert out.results[0].confidence == "OK"
+
+
+def test_scan_uses_bounded_concurrency_when_requested():
+    tickers = ",".join(f"T{i}" for i in range(8))
+    serial = ScannerService(
+        universe_service=UniverseService(),
+        snapshot_service=SlowSnapshotService(delay=0.03),
+        persist=False,
+    )
+    concurrent = ScannerService(
+        universe_service=UniverseService(),
+        snapshot_service=SlowSnapshotService(delay=0.03),
+        persist=False,
+    )
+
+    start = time.perf_counter()
+    serial_out = serial.scan(tickers=tickers, filters=ScanFilters(), max_workers=1)
+    serial_elapsed = time.perf_counter() - start
+
+    start = time.perf_counter()
+    concurrent_out = concurrent.scan(tickers=tickers, filters=ScanFilters(), max_workers=4)
+    concurrent_elapsed = time.perf_counter() - start
+
+    assert len(serial_out.results) == 8
+    assert len(concurrent_out.results) == 8
+    assert concurrent_elapsed < serial_elapsed * 0.75
+    assert "max_workers=4" in " ".join(concurrent_out.notes)
+
+
+def test_concurrent_scan_records_ticker_errors_as_notes():
+    class RaisingSnapshotService(SlowSnapshotService):
+        def build_snapshot(self, ticker: str) -> CombinedSnapshot:
+            if ticker == "BAD":
+                raise RuntimeError("provider timeout")
+            return super().build_snapshot(ticker)
+
+    out = ScannerService(
+        universe_service=UniverseService(),
+        snapshot_service=RaisingSnapshotService(delay=0),
+        persist=False,
+    ).scan(tickers="HOT,BAD,COOL", filters=ScanFilters(), max_workers=3)
+
+    assert [result.ticker for result in out.results] == ["HOT", "COOL"]
+    assert any("BAD: scan error: provider timeout" in note for note in out.notes)
 
 
 def test_results_sorted_by_absolute_gap():

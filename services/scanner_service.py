@@ -11,6 +11,7 @@ snapshot and write it back so the next run is faster.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import uuid
 from typing import Any
 
@@ -132,6 +133,7 @@ class ScannerService:
         tickers: list[str] | str | None = None,
         all_universes: bool = False,
         filters: ScanFilters | None = None,
+        max_workers: int = 1,
     ) -> ScanRunOutput:
         filters = filters or ScanFilters()
         selection = self.universe_service.resolve_selection(
@@ -158,15 +160,43 @@ class ScannerService:
 
         cached_assets = self._load_cached_assets(selection.tickers)
         results: list[ScannerResult] = []
+        worker_count = max(1, int(max_workers or 1))
 
-        for ticker in selection.tickers:
-            try:
-                result = self._scan_ticker(ticker, selection, cached_assets, filters)
-            except Exception as exc:  # one bad ticker must not kill the run
-                run_notes.append(f"{ticker}: scan error: {exc}")
-                continue
-            if result is not None:
-                results.append(result)
+        if worker_count == 1 or len(selection.tickers) == 1:
+            for ticker in selection.tickers:
+                try:
+                    result = self._scan_ticker(ticker, selection, cached_assets, filters)
+                except Exception as exc:  # one bad ticker must not kill the run
+                    run_notes.append(f"{ticker}: scan error: {exc}")
+                    continue
+                if result is not None:
+                    results.append(result)
+        else:
+            results_by_index: dict[int, ScannerResult] = {}
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {
+                    executor.submit(
+                        self._scan_ticker,
+                        ticker,
+                        selection,
+                        cached_assets,
+                        filters,
+                    ): (index, ticker)
+                    for index, ticker in enumerate(selection.tickers)
+                }
+                for future in as_completed(futures):
+                    index, ticker = futures[future]
+                    try:
+                        result = future.result()
+                    except Exception as exc:  # one bad ticker must not kill the run
+                        run_notes.append(f"{ticker}: scan error: {exc}")
+                        continue
+                    if result is not None:
+                        results_by_index[index] = result
+            results.extend(results_by_index[index] for index in sorted(results_by_index))
+            run_notes.append(
+                f"Scanned {len(selection.tickers)} ticker(s) with max_workers={worker_count}."
+            )
 
         results.sort(key=_gap_sort_key, reverse=True)
 
