@@ -362,6 +362,71 @@ def test_conflict_candidate_is_rejected():
     assert "unusable_confidence" in candidate.matched_signals
 
 
+def test_float_rotation_adjustment_lifts_score_without_bypassing_gap_basis_gate():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[
+                    _result(
+                        ticker="LOW",
+                        gap_pct=6.0,
+                        volume=2_000_000,
+                        rel_volume=1.5,
+                        gap_basis="premarket",
+                    ),
+                    _result(
+                        ticker="PLAIN",
+                        gap_pct=6.0,
+                        volume=2_000_000,
+                        rel_volume=1.5,
+                        gap_basis="premarket",
+                    ),
+                    _result(
+                        ticker="LATE",
+                        gap_pct=6.0,
+                        volume=2_000_000,
+                        rel_volume=1.5,
+                        gap_basis="last_trade",
+                    ),
+                ],
+                notes=[],
+            )
+
+    class FloatEvidenceService:
+        def enrich_candidates(self, candidates):
+            for candidate in candidates:
+                if candidate.ticker in {"LOW", "LATE"}:
+                    candidate.evidence = SmallCapEvidence(
+                        ticker=candidate.ticker,
+                        float_shares=1_000_000,
+                        is_low_float=True,
+                        float_rotation=2.0,
+                        missing_fields=["catalyst", "filings"],
+                    )
+                    candidate.missing_fields = list(candidate.evidence.missing_fields)
+            return candidates
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=FloatEvidenceService(),
+    ).scan(tickers="LOW,PLAIN,LATE", preset_name="sykes_small_cap_v0")
+
+    by_ticker = {candidate.ticker: candidate for candidate in output.candidates}
+
+    assert by_ticker["LOW"].score > by_ticker["PLAIN"].score
+    assert by_ticker["LOW"].grade == "A_WATCH"
+    assert "low_float_fit" in by_ticker["LOW"].matched_signals
+    assert "full_float_rotation" in by_ticker["LOW"].matched_signals
+    assert by_ticker["LATE"].score == by_ticker["LOW"].score
+    assert by_ticker["LATE"].grade != "A_WATCH"
+    assert by_ticker["LATE"].grade == "B_WATCH"
+
+
 def test_small_cap_scanner_unions_cap_tiers_and_ranks_candidates():
     class FakeScanner:
         def __init__(self):
