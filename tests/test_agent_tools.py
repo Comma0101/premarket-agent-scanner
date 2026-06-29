@@ -624,6 +624,39 @@ def test_run_desk_tool_requires_selection():
     assert "error" in out
 
 
+def test_run_morning_brief_tool_returns_packet():
+    class FakeMorningBriefService:
+        def run(self, **kwargs):
+            assert kwargs["profile"] == "tim_grittani"
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 25
+            assert kwargs["save_journal"] is False
+            return {
+                "agent_name": "premarket_desk",
+                "strategy": "tim_grittani",
+                "status": "OK",
+                "brief_summary": "1 primary.",
+                "watchlist": {"primary_watch": [], "monitoring": []},
+            }
+
+    out = tools.run_morning_brief(
+        profile="tim_grittani",
+        market="us-listed",
+        market_limit=25,
+        save_journal=False,
+        service=FakeMorningBriefService(),
+    )
+
+    assert out["agent_name"] == "premarket_desk"
+    assert out["strategy"] == "tim_grittani"
+    assert out["brief_summary"] == "1 primary."
+
+
+def test_run_morning_brief_tool_requires_selection():
+    out = tools.run_morning_brief()
+    assert "error" in out
+
+
 def test_get_trader_context_tool_requires_ticker():
     out = tools.get_trader_context(ticker="")
     assert "error" in out
@@ -737,6 +770,7 @@ def test_tool_definitions_are_well_formed():
         "get_trader_context",
         "explain_ticker_as_trader",
         "run_desk",
+        "run_morning_brief",
         "list_universes",
         "get_ticker_snapshot",
     }
@@ -781,3 +815,8 @@ def test_tool_definitions_are_well_formed():
     assert "trader_profiles" in run_desk_tool["input_schema"]["properties"]
     assert "watchlist" in run_desk_tool["input_schema"]["properties"]
     assert "market" in run_desk_tool["input_schema"]["properties"]
+
+    morning_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "run_morning_brief")
+    assert morning_tool["input_schema"]["required"] == []
+    assert "profile" in morning_tool["input_schema"]["properties"]
+    assert "save_journal" in morning_tool["input_schema"]["properties"]

@@ -740,6 +740,55 @@ def run_desk(
         return {"error": str(exc)}
 
 
+def run_morning_brief(
+    *,
+    profile: str = "default",
+    tickers: list[str] | str | None = None,
+    universe: str | list[str] | None = None,
+    watchlist: str | list[str] | None = None,
+    all_universes: bool = False,
+    market: str | None = None,
+    market_limit: int | None = None,
+    max_workers: int | None = None,
+    scan_preset_name: str = "sykes_small_cap_v0",
+    include_intraday: bool = False,
+    include_daily: bool = False,
+    refresh_catalysts: bool = False,
+    save_journal: bool = True,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    """Run the morning brief orchestrator and return a grounded brief packet."""
+    normalized_tickers = _normalize_ticker_list(tickers)
+    if not any([normalized_tickers, universe, watchlist, all_universes, market]):
+        return {
+            "error": "Provide at least one selection: tickers, universe, watchlist, market, or all_universes."
+        }
+
+    if service is None:
+        from services.morning_brief_service import MorningBriefService
+
+        service = MorningBriefService()
+
+    try:
+        return service.run(
+            profile=profile,
+            tickers=normalized_tickers,
+            universe=universe,
+            watchlist=watchlist,
+            all_universes=all_universes,
+            market=market,
+            market_limit=market_limit,
+            max_workers=max_workers,
+            scan_preset_name=scan_preset_name,
+            include_intraday=include_intraday,
+            include_daily=include_daily,
+            refresh_catalysts=refresh_catalysts,
+            save_journal=save_journal,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
 def _normalize_ticker_list(tickers: list[str] | str | None) -> list[str] | None:
     if tickers is None:
         return None

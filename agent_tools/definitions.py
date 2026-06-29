@@ -526,6 +526,96 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "run_morning_brief",
+        "description": (
+            "Run the premarket Desk morning brief. This wraps the grounded Desk "
+            "run, ranks candidates into watch buckets, builds data caveats and "
+            "why narratives, and optionally writes a JSON session journal. It "
+            "is not buy/sell advice."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "profile": {
+                    "type": "string",
+                    "description": (
+                        "Ranking/narrative profile. Defaults to default; examples "
+                        "include tim_grittani, alex_temiz, lance_breitstein, "
+                        "and timothy_sykes."
+                    ),
+                },
+                "tickers": {
+                    "oneOf": [
+                        {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                        },
+                        {"type": "string"},
+                    ],
+                    "description": "Ticker symbols as an array or comma-separated string.",
+                },
+                "universe": {
+                    "type": "string",
+                    "description": "Universe name(s), comma-separated.",
+                },
+                "watchlist": {
+                    "type": "string",
+                    "description": "Watchlist name(s), comma-separated.",
+                },
+                "all_universes": {
+                    "type": "boolean",
+                    "description": "Use every defined universe. Defaults to false.",
+                },
+                "market": {
+                    "type": "string",
+                    "enum": ["us-listed"],
+                    "description": (
+                        "Whole-market source to scan before building the brief. "
+                        "Use 'us-listed' for filtered US-listed common stocks."
+                    ),
+                },
+                "market_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Optional cap for market scan smoke tests.",
+                },
+                "max_workers": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Optional bounded worker count for broad scans.",
+                },
+                "scan_preset_name": {
+                    "type": "string",
+                    "description": (
+                        "Small-cap scan preset to use when market is provided. "
+                        "Defaults to sykes_small_cap_v0."
+                    ),
+                },
+                "include_intraday": {
+                    "type": "boolean",
+                    "description": "Include intraday bar context when available.",
+                },
+                "include_daily": {
+                    "type": "boolean",
+                    "description": "Include daily bar context when available.",
+                },
+                "refresh_catalysts": {
+                    "type": "boolean",
+                    "description": "Opt in to live RSS catalyst lookup.",
+                },
+                "save_journal": {
+                    "type": "boolean",
+                    "description": (
+                        "Write the JSON session journal under data/sessions. "
+                        "Defaults to true."
+                    ),
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "list_universes",
         "description": (
             "List the defined universes and watchlists with their member tickers. "
@@ -570,6 +660,7 @@ _DISPATCH: dict[str, Callable[..., dict[str, Any]]] = {
     "get_trader_context": tools.get_trader_context,
     "explain_ticker_as_trader": tools.explain_ticker_as_trader,
     "run_desk": tools.run_desk,
+    "run_morning_brief": tools.run_morning_brief,
     "list_universes": tools.list_universes,
     "get_ticker_snapshot": tools.get_ticker_snapshot,
 }
