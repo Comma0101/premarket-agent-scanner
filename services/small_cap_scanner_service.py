@@ -124,6 +124,7 @@ class SmallCapScannerService:
             candidates = self.evidence_service.enrich_candidates(candidates)
             for candidate in candidates:
                 _apply_float_signals(candidate)
+                _apply_catalyst_signals(candidate)
             candidates = sorted(
                 candidates,
                 key=lambda candidate: candidate.score,
@@ -321,6 +322,43 @@ def _apply_float_signals(candidate: SmallCapCandidate) -> None:
     )
 
 
+def _apply_catalyst_signals(candidate: SmallCapCandidate) -> None:
+    evidence = candidate.evidence
+    if evidence is None:
+        return
+
+    catalysts = list(evidence.catalysts)
+    if not catalysts:
+        if candidate.grade == "A_WATCH":
+            candidate.grade = "B_WATCH"
+            _append_unique(
+                candidate.risk_notes,
+                "No verified catalyst; A_WATCH is capped until catalyst is sourced.",
+            )
+        return
+
+    for catalyst in catalysts:
+        quality = (catalyst.catalyst_quality or "").lower()
+        if quality == "hard" and _is_fresh_catalyst(catalyst.recency_minutes):
+            _add_signal_score(candidate, "fresh_hard_catalyst", 15)
+            break
+        if quality == "soft":
+            _add_signal_score(candidate, "soft_catalyst", 5)
+            break
+
+    candidate.missing_fields = list(evidence.missing_fields)
+    candidate.grade = _grade(
+        candidate.score,
+        candidate.missing_fields,
+        has_absolute_volume_floor=_has_absolute_volume_floor(candidate),
+        gap_basis=candidate.gap_basis,
+    )
+
+
+def _is_fresh_catalyst(recency_minutes: float | None) -> bool:
+    return recency_minutes is None or recency_minutes <= 120
+
+
 def _add_signal_score(
     candidate: SmallCapCandidate,
     signal: str,
@@ -334,6 +372,11 @@ def _add_signal_score(
 
 def _has_absolute_volume_floor(candidate: SmallCapCandidate) -> bool:
     return candidate.volume is not None and candidate.volume >= 500_000
+
+
+def _append_unique(values: list[str], value: str) -> None:
+    if value not in values:
+        values.append(value)
 
 
 def _candidate(

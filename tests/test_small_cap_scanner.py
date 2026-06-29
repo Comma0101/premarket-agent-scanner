@@ -421,11 +421,91 @@ def test_float_rotation_adjustment_lifts_score_without_bypassing_gap_basis_gate(
     by_ticker = {candidate.ticker: candidate for candidate in output.candidates}
 
     assert by_ticker["LOW"].score > by_ticker["PLAIN"].score
-    assert by_ticker["LOW"].grade == "A_WATCH"
+    assert by_ticker["LOW"].grade == "B_WATCH"
     assert "low_float_fit" in by_ticker["LOW"].matched_signals
     assert "full_float_rotation" in by_ticker["LOW"].matched_signals
     assert by_ticker["LATE"].score == by_ticker["LOW"].score
     assert by_ticker["LATE"].grade != "A_WATCH"
+    assert by_ticker["LATE"].grade == "B_WATCH"
+
+
+def test_catalyst_adjustment_lifts_score_and_caps_missing_catalyst_a_watch():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[
+                    _result(
+                        ticker="HARD",
+                        gap_pct=6.0,
+                        volume=2_000_000,
+                        rel_volume=1.5,
+                        gap_basis="premarket",
+                    ),
+                    _result(
+                        ticker="NONE",
+                        gap_pct=6.0,
+                        volume=2_000_000,
+                        rel_volume=1.5,
+                        gap_basis="premarket",
+                    ),
+                    _result(
+                        ticker="LATE",
+                        gap_pct=6.0,
+                        volume=2_000_000,
+                        rel_volume=1.5,
+                        gap_basis="last_trade",
+                    ),
+                ],
+                notes=[],
+            )
+
+    class CatalystEvidenceService:
+        def enrich_candidates(self, candidates):
+            for candidate in candidates:
+                catalysts = []
+                missing_fields = ["catalyst", "filings"]
+                if candidate.ticker in {"HARD", "LATE"}:
+                    catalysts = [
+                        CatalystEvent(
+                            ticker=candidate.ticker,
+                            headline=f"{candidate.ticker} announces FDA clearance",
+                            published_at="2026-06-29T12:00:00Z",
+                            source="fake-wire",
+                            catalyst_quality="hard",
+                            recency_minutes=30,
+                            confidence="OK",
+                        )
+                    ]
+                    missing_fields = ["filings"]
+                candidate.evidence = SmallCapEvidence(
+                    ticker=candidate.ticker,
+                    float_shares=1_000_000,
+                    is_low_float=True,
+                    float_rotation=2.0,
+                    catalysts=catalysts,
+                    missing_fields=missing_fields,
+                )
+                candidate.missing_fields = list(candidate.evidence.missing_fields)
+            return candidates
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=CatalystEvidenceService(),
+    ).scan(tickers="HARD,NONE,LATE", preset_name="sykes_small_cap_v0")
+
+    by_ticker = {candidate.ticker: candidate for candidate in output.candidates}
+
+    assert by_ticker["HARD"].score > by_ticker["NONE"].score
+    assert by_ticker["HARD"].grade == "A_WATCH"
+    assert "fresh_hard_catalyst" in by_ticker["HARD"].matched_signals
+    assert by_ticker["NONE"].grade == "B_WATCH"
+    assert any("catalyst" in note.lower() for note in by_ticker["NONE"].risk_notes)
+    assert by_ticker["LATE"].score == by_ticker["HARD"].score
     assert by_ticker["LATE"].grade == "B_WATCH"
 
 
