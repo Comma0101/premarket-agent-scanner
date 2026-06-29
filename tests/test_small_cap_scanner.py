@@ -139,6 +139,14 @@ def test_scan_small_caps_cli_reports_market_source_failure_cleanly(monkeypatch):
         "fetch_nasdaq_trader_symbol_files",
         raise_network_error,
     )
+    # Force the Alpaca-assets path off so this test is deterministic regardless of
+    # whether Alpaca keys are configured in the environment; otherwise a configured
+    # env uses Alpaca and never reaches the patched Nasdaq failure.
+    monkeypatch.setattr(
+        market_module.AlpacaAssetsProvider,
+        "is_configured",
+        False,
+    )
 
     result = CliRunner().invoke(
         module.app,
