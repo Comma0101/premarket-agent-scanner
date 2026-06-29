@@ -214,10 +214,10 @@ candidates by gap, volume, RVOL, cap fit, and data confidence, while enriching
 the output with evidence when available.
 
 Evidence currently includes float and shares outstanding from profile
-providers, exchange/listing context, recent SEC filing metadata, cached
-catalyst/news records, and local former-runner history. Missing evidence is
-still shown as unknown rather than inferred. Short-interest and borrow-cost
-context remain unsupported in v1.
+providers, float rotation (volume divided by float), exchange/listing context,
+recent SEC filing metadata, cached catalyst/news records, and local
+former-runner history. Missing evidence is still shown as unknown rather than
+inferred. Short-interest and borrow-cost context remain unsupported in v1.
 
 Example:
 

@@ -9,13 +9,13 @@
 - Volume metrics: current volume and relative volume when average volume is available.
 - Filters/tool inputs: cap tier, minimum/maximum market cap, minimum absolute gap percent, minimum volume, minimum relative volume, direction, and confident-only filtering.
 - Data quality/context: confidence label, notes, sources, run status, run id, scan start/completion timestamps, and result creation timestamp.
-- Cached asset/profile fields exist for exchange, sector, industry, country, shares outstanding, and float shares, but the current scanner result and tool schemas do not expose float classification or Sykes-specific setup context.
+- Small-cap evidence now exposes exchange, shares outstanding, float shares, low-float classification, and float rotation (day volume divided by float) when a public profile source supplies float.
 
 ## Gaps For A Sykes-Style Lens
 
 | Gap | Why It Matters | Current Status | Possible Future Source |
 | --- | --- | --- | --- |
-| Float / low-float classification | Sykes-style setups often depend on supply constraints and squeeze potential. | unsupported | FMP profile, Polygon, Nasdaq, SEC filings, or yfinance float fallback |
+| Float / low-float classification and float rotation | Sykes-style setups often depend on supply constraints, squeeze potential, and whether volume is rotating the tradeable float. | partial: supported when FMP/yfinance supplies float; FMP profile float is spotty, so the data layer backfills from yfinance and derives `float_rotation = volume / float` | FMP profile, yfinance float fallback; future hardening could add Polygon, Nasdaq, SEC filings, or issuer filings |
 | Catalyst/news quality | Breaking-news movers need source, freshness, headline substance, and relevance checks before a catalyst label is trusted. | unsupported | News API, Benzinga, Financial Modeling Prep news, SEC press releases, issuer investor-relations feeds, or curated RSS feeds |
 | SEC filing / offering / dilution risk | Penny-stock and small-cap moves can fail or become dangerous when recent filings indicate offerings, toxic financing, reverse splits, or heavy dilution risk. | unsupported | SEC EDGAR company filings, FMP SEC filings, Nasdaq filings, or issuer investor-relations filing feeds |
 | Former-runner history | Former runners require historical spike dates, prior percent moves, volume surges, and prior catalyst context, not just today's gap. | unsupported | Local historical scan archive, Polygon aggregates, yfinance history, Nasdaq historical data, or manually curated watchlists |
@@ -25,7 +25,7 @@
 
 ## Suggested Data-Layer Priority
 
-1. Float and listing/OTC context.
+1. Harden float coverage with additional float/free-float sources and recent-share-issuance checks.
 2. Catalyst/news and SEC filing ingestion.
 3. Former-runner and intraday pattern history.
 4. Short interest/borrow context.
