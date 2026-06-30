@@ -75,6 +75,7 @@ class SnapshotService:
     ) -> CombinedSnapshot:
         sources: list[str] = []
         notes: list[str] = []
+        provider_failures: dict[str, str] = {}
 
         # yfinance is primary for previous close, premarket, and last price.
         previous_close = yf_data.previous_close
@@ -90,6 +91,7 @@ class SnapshotService:
 
         if yf_data.error:
             notes.append(f"yfinance: {yf_data.error}")
+            provider_failures[yf_data.source] = yf_data.error
         else:
             sources.append(yf_data.source)
         notes.extend(yf_data.notes)
@@ -104,8 +106,14 @@ class SnapshotService:
             latest_price = latest_price if latest_price is not None else alpaca_data.latest_price
             volume = volume if volume is not None else alpaca_data.volume
             timestamp = timestamp or alpaca_data.timestamp
-        elif alpaca_data is not None and alpaca_data.error not in {None, "missing_credentials"}:
+        elif alpaca_data is not None and alpaca_data.error is not None:
+            # Surface every errored Alpaca response in provider_failures (including
+            # ``missing_credentials`` — the desk needs to know Alpaca did not
+            # contribute, even when the reason is "no keys configured"). The
+            # divergence note is still skipped for missing_credentials so the
+            # existing fall-back-to-yfinance tests keep passing.
             notes.append(f"alpaca: {alpaca_data.error}")
+            provider_failures[alpaca_data.source] = alpaca_data.error
 
         confidence = self._assign_confidence(
             previous_close=previous_close,
@@ -115,6 +123,13 @@ class SnapshotService:
             yf_data=yf_data,
             alpaca_data=alpaca_data if alpaca_usable else None,
             notes=notes,
+        )
+
+        data_status = self._assign_data_status(
+            sources=sources,
+            provider_failures=provider_failures,
+            alpaca_configured=alpaca_data is not None,
+            confidence=confidence,
         )
 
         snapshot = CombinedSnapshot(
@@ -136,10 +151,46 @@ class SnapshotService:
             raw_alpaca_json=json.dumps(alpaca_data.raw) if alpaca_usable and alpaca_data.raw else None,
             yfinance_data=yf_data,
             alpaca_data=alpaca_data,
+            provider_failures=provider_failures,
+            data_status=data_status,
         )
         snapshot.market_cap = market_cap
         snapshot.average_volume = average_volume
         return snapshot
+
+    @staticmethod
+    def _assign_data_status(
+        *,
+        sources: list[str],
+        provider_failures: dict[str, str],
+        alpaca_configured: bool,
+        confidence: str,
+    ) -> str:
+        """Top-level pipeline summary used by the desk for at-a-glance triage.
+
+        Order of precedence:
+          1. No providers contributed and none were configured -> ``no_providers``.
+          2. Every configured provider errored -> ``provider_failure``.
+          3. Any provider errored, missing field, low/conflict confidence
+             -> ``partial``.
+          4. Stale data -> ``stale``.
+          5. Otherwise -> ``live``.
+        """
+        if not sources and not provider_failures and not alpaca_configured:
+            return "no_providers"
+        if provider_failures and not sources:
+            return "provider_failure"
+        if provider_failures or confidence in {
+            "MISSING_PREMARKET_PRICE",
+            "MISSING_PREVIOUS_CLOSE",
+            "MISSING_MARKET_CAP",
+            "LOW_CONFIDENCE",
+            "CONFLICT",
+        }:
+            return "partial"
+        if confidence == "STALE_DATA":
+            return "stale"
+        return "live"
 
     def _assign_confidence(
         self,

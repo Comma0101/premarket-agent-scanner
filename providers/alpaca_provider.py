@@ -88,6 +88,21 @@ class AlpacaProvider:
         if latest_trade_price is None and latest_price is None:
             notes.append("Alpaca has no recent IEX print for this ticker.")
 
+        error = None
+        if not any(
+            [
+                previous_close,
+                latest_trade_price,
+                latest_price,
+                open_price,
+                high,
+                low,
+                volume,
+                timestamp,
+            ]
+        ):
+            error = "; ".join(notes) or "Alpaca returned no snapshot data."
+
         return ProviderPriceData(
             ticker=normalized,
             source=self.source_name,
@@ -101,6 +116,7 @@ class AlpacaProvider:
             timestamp=timestamp,
             raw=raw,
             notes=notes,
+            error=error,
         )
 
     def get_previous_close(self, ticker: str) -> tuple[float | None, dict[str, Any]]:

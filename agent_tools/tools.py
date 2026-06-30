@@ -941,6 +941,8 @@ def get_ticker_snapshot(
         "volume": snap.volume,
         "rel_volume": compute_rel_volume(snap.volume, snap.average_volume),
         "confidence": snap.confidence,
+        "data_status": snap.data_status,
+        "provider_failures": dict(snap.provider_failures),
         "sources": snap.sources,
         "timestamp": snap.timestamp,
         "notes": snap.notes,

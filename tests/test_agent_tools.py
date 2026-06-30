@@ -296,6 +296,44 @@ def test_get_ticker_snapshot_tool():
     assert out["ticker"] == "NVDA"
     assert out["gap_pct"] == 4.0
     assert out["confidence"] == "OK"
+    assert out["data_status"] == "live"
+    assert out["provider_failures"] == {}
+
+
+def test_get_ticker_snapshot_surfaces_provider_failures_and_data_status():
+    """Reproduces the desk live-data failure: yfinance DNS-fails, no Alpaca.
+
+    The tool must surface a structured failure so the desk can triage without
+    parsing free-text notes. No price is invented; all fields stay None.
+    """
+
+    class ErroringYF:
+        source_name = "yfinance"
+
+        def get_snapshot(self, ticker):
+            return ProviderPriceData(
+                ticker=ticker.upper(),
+                source="yfinance",
+                error="ConnectionError: DNS failure for guce.yahoo.com",
+                notes=["get_info failed: cannot resolve guce.yahoo.com"],
+            )
+
+    svc = SnapshotService(yf_provider=ErroringYF(), alpaca_provider=None)
+    out = tools.get_ticker_snapshot(ticker="MRVL", snapshot_service=svc)
+
+    assert out["confidence"] == "ERROR"
+    assert out["data_status"] == "provider_failure"
+    assert out["provider_failures"] == {
+        "yfinance": "ConnectionError: DNS failure for guce.yahoo.com",
+    }
+    # Prime directive: never invent prices.
+    assert out["previous_close"] is None
+    assert out["premarket_price"] is None
+    assert out["latest_price"] is None
+    assert out["gap_pct"] is None
+    assert out["gap_basis"] is None
+    # Existing fields preserved so callers can still inspect notes.
+    assert any("yfinance:" in note for note in out["notes"])
 
 
 def test_explain_breitstein_ticker_tool_returns_moment_view():

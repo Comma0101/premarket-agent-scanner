@@ -16,6 +16,16 @@ Confidence = Literal[
     "ERROR",
 ]
 
+# Top-level summary of how the snapshot pipeline ran. Distinct from
+# `confidence` (data quality) — `data_status` labels the source pipeline so
+# the desk can triage at a glance:
+#   - "live"             : at least one provider returned clean data
+#   - "partial"          : some fields could not be resolved (MISSING_*)
+#   - "stale"            : data is older than the staleness window
+#   - "provider_failure" : every configured provider errored
+#   - "no_providers"     : no providers were configured at all
+DataStatus = Literal["live", "partial", "stale", "provider_failure", "no_providers"]
+
 Direction = Literal["up", "down", "both"]
 SmallCapGrade = Literal["A_WATCH", "B_WATCH", "C_WATCH", "REJECT"]
 BreitsteinGrade = Literal["A_WATCH", "B_WATCH", "C_WATCH", "REJECT"]
@@ -98,6 +108,11 @@ class CombinedSnapshot:
     raw_alpaca_json: str | None = None
     yfinance_data: ProviderPriceData | None = None
     alpaca_data: ProviderPriceData | None = None
+    # Structured provider-failure surface. Maps source name -> first error string.
+    # Always populated so the desk can branch on it without parsing `notes`.
+    provider_failures: dict[str, str] = field(default_factory=dict)
+    # Top-level data pipeline summary; see `DataStatus` literal above.
+    data_status: DataStatus = "live"
 
 
 @dataclass

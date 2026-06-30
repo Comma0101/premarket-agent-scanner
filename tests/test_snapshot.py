@@ -90,3 +90,94 @@ def test_with_configured_providers_is_yfinance_only_without_keys(monkeypatch):
     monkeypatch.setenv("ALPACA_SECRET_KEY", "")
     service = SnapshotService.with_configured_providers()
     assert service.alpaca_provider is None
+
+
+def _yf_error(message: str) -> ProviderPriceData:
+    return ProviderPriceData(
+        ticker="NVDA",
+        source="yfinance",
+        error=message,
+        notes=[f"yfinance failure detail: {message}"],
+    )
+
+
+def _alpaca_error(message: str) -> ProviderPriceData:
+    return ProviderPriceData(
+        ticker="NVDA",
+        source="alpaca",
+        error=message,
+        notes=[f"alpaca failure detail: {message}"],
+    )
+
+
+def test_snapshot_provider_failure_includes_provider_failures_indexed_by_source():
+    # Both providers errored -> snapshot cannot construct any field. The provider
+    # failures must be surfaced in a structured form so the desk can tell which
+    # sources failed without parsing the free-text notes list.
+    snap = _service(
+        _yf_error("DNS failure for guce.yahoo.com"),
+        _alpaca_error("missing_credentials"),
+    ).build_snapshot("NVDA")
+
+    assert snap.confidence == "ERROR"
+    assert snap.provider_failures == {
+        "yfinance": "DNS failure for guce.yahoo.com",
+        "alpaca": "missing_credentials",
+    }
+    assert snap.data_status == "provider_failure"
+
+
+def test_snapshot_data_status_is_live_on_clean_data():
+    snap = _service(_yf(100.0, 105.0), _alpaca(prev=100.0, pre=105.1)).build_snapshot("NVDA")
+    assert snap.confidence == "OK"
+    assert snap.data_status == "live"
+    assert snap.provider_failures == {}
+
+
+def test_snapshot_data_status_is_partial_when_yfinance_only_with_missing_premarket():
+    # Single source (yfinance) but no premarket price: live quote is OK but the
+    # snapshot is partial because we cannot establish a premarket gap.
+    yf = ProviderPriceData(
+        ticker="NVDA",
+        source="yfinance",
+        previous_close=100.0,
+        premarket_price=None,
+        latest_price=104.0,
+        volume=1_000_000,
+        timestamp=utc_now_iso(),
+        raw={"marketCap": 3.0e12},
+    )
+    snap = _service(yf, _alpaca(error="missing_credentials")).build_snapshot("NVDA")
+    assert snap.confidence == "LOW_CONFIDENCE"
+    assert snap.data_status == "partial"
+    # Alpaca contributes nothing here, so its missing_credentials shows up in
+    # provider_failures — that is the desk's signal that Alpaca is offline.
+    assert snap.provider_failures == {"alpaca": "missing_credentials"}
+
+
+def test_snapshot_yfinance_only_provider_failure_no_alpaca_attached():
+    # Reproduces the desk workflow: Alpaca not configured, yfinance DNS-fails.
+    svc = SnapshotService(
+        yf_provider=FakeProvider("yfinance", _yf_error("DNS failure for guce.yahoo.com")),
+        alpaca_provider=None,
+    )
+    snap = svc.build_snapshot("MRVL")
+
+    assert snap.confidence == "ERROR"
+    assert snap.provider_failures == {"yfinance": "DNS failure for guce.yahoo.com"}
+    assert snap.data_status == "provider_failure"
+    assert "yfinance: DNS failure for guce.yahoo.com" in snap.notes
+
+
+def test_snapshot_provider_failures_preserve_existing_confidence_label():
+    # yfinance errors but Alpaca returned a clean quote — the snapshot should
+    # still report the provider failure in provider_failures so the desk knows
+    # to triage, but the confidence label must NOT be silently flipped. The
+    # prime directive is "preserve confidence labels".
+    snap = _service(
+        _yf_error("DNS failure for guce.yahoo.com"),
+        _alpaca(prev=100.0, pre=105.0),
+    ).build_snapshot("NVDA")
+    assert snap.confidence == "OK"
+    assert snap.data_status == "partial"
+    assert snap.provider_failures == {"yfinance": "DNS failure for guce.yahoo.com"}
