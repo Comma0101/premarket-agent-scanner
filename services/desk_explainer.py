@@ -4,9 +4,16 @@ from datetime import datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from services.session_time_service import data_caveat_for, session_mode_for
+
 
 DISCLAIMER = "Matches your filter — not buy/sell advice. Verify before acting."
 NY_TZ = ZoneInfo("America/New_York")
+LANCE_INTRADAY_CONFIRMATIONS = [
+    "2-minute prior-bar high/low break",
+    "2x volume confirmation",
+    "VWAP filter pass",
+]
 
 
 def build_breitstein_ticker_explanation(
@@ -19,14 +26,15 @@ def build_breitstein_ticker_explanation(
     data_card = _data_card(snapshot)
     setup_stack = _setup_stack(snapshot, candidate)
     next_needed = _next_needed(snapshot, candidate)
-    moment_state = _moment_state(snapshot, candidate)
+    lance_state = _lance_state(snapshot=snapshot, candidate=candidate)
 
     return {
         "ticker": ticker,
         "trader": "lance_breitstein",
         "lens": "mean_reversion_after_capitulation",
         "verdict": _verdict(candidate),
-        "moment_state": moment_state,
+        "moment_state": lance_state["state"],
+        "lance_state": lance_state,
         "data_card": data_card,
         "setup_stack": setup_stack,
         "moment_path": _moment_path(snapshot, candidate),
@@ -51,13 +59,23 @@ def build_trader_context_explanation(context: dict[str, Any]) -> dict[str, Any]:
         evidence=evidence,
         technicals=technicals,
     )
+    lance_state = (
+        _lance_state(snapshot=snapshot, technicals=technicals)
+        if trader == "lance_breitstein"
+        else None
+    )
+    moment_state = (
+        lance_state["state"]
+        if lance_state is not None
+        else _context_moment_state(snapshot)
+    )
 
-    return {
+    output = {
         "ticker": ticker,
         "trader": trader,
         "lens": _context_lens(trader),
         "verdict": _context_verdict(snapshot),
-        "moment_state": _context_moment_state(snapshot),
+        "moment_state": moment_state,
         "data_card": _data_card(snapshot),
         "setup_stack": setup_stack,
         "moment_path": _context_moment_path(snapshot, evidence, technicals),
@@ -67,6 +85,9 @@ def build_trader_context_explanation(context: dict[str, Any]) -> dict[str, Any]:
         "notes": list(context.get("notes") or []),
         "disclaimer": DISCLAIMER,
     }
+    if lance_state is not None:
+        output["lance_state"] = lance_state
+    return output
 
 
 def _data_card(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -200,15 +221,150 @@ def _moment_state(
     snapshot: dict[str, Any],
     candidate: dict[str, Any] | None,
 ) -> str:
-    if candidate is not None:
-        return "building_intraday_confirmation"
-    if snapshot.get("confidence") in {"ERROR", "CONFLICT", "STALE_DATA"}:
-        return "not_ready_data_quality"
-    if snapshot.get("gap_basis") != "premarket":
-        return "not_ready_data_quality"
+    return _lance_state(snapshot=snapshot, candidate=candidate)["state"]
+
+
+def _lance_state(
+    *,
+    snapshot: dict[str, Any],
+    candidate: dict[str, Any] | None = None,
+    technicals: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    caveat = data_caveat_for(
+        snapshot.get("timestamp"),
+        gap_basis=snapshot.get("gap_basis"),
+        confidence=snapshot.get("confidence"),
+        halt_status=snapshot.get("halt_status"),
+    )
+    if _lance_data_quality_blocked(snapshot):
+        return _lance_state_packet(
+            state="blocked_data_quality",
+            reason=(
+                "Data quality blocks Lance review: "
+                f"gap_basis={snapshot.get('gap_basis') or 'unknown'}, "
+                f"confidence={snapshot.get('confidence') or 'unknown'}."
+            ),
+            data_caveat=caveat,
+        )
+
+    intraday = _as_dict((technicals or {}).get("intraday"))
+    signal = _as_dict(intraday.get("breitstein_signal"))
+    if signal:
+        if signal.get("vwap_filter_passed") is False:
+            return _lance_state_packet(
+                state="invalidated",
+                reason="VWAP filter failed; Lance setup is invalidated.",
+                direction=signal.get("direction"),
+                data_caveat=caveat,
+            )
+        if (
+            signal.get("confidence") == "OK"
+            and signal.get("volume_2x_confirmed") is True
+        ):
+            return _lance_state_packet(
+                state="triggered_reference",
+                reason=(
+                    "Lance intraday trigger is present: prior-bar break, "
+                    "2x volume, and VWAP filter passed."
+                ),
+                required_confirmations=[],
+                entry_reference=signal.get("entry_price"),
+                risk_reference=signal.get("stop_price"),
+                target_reference=signal.get("target_price"),
+                reference_source="breitstein_intraday",
+                direction=signal.get("direction"),
+                data_caveat=caveat,
+            )
+
+    failures = _lance_phase_one_failures(
+        snapshot=snapshot,
+        candidate=candidate,
+    )
+    if failures:
+        return _lance_state_packet(
+            state="not_in_play",
+            reason="Lance Phase 1 filters are not satisfied.",
+            required_confirmations=failures,
+            data_caveat=caveat,
+        )
+
+    if _technical_status(technicals or {}, "intraday") == "PASS":
+        return _lance_state_packet(
+            state="setup_forming",
+            reason=(
+                "Lance Phase 1 context and intraday bars are present; "
+                "waiting for the exact trigger."
+            ),
+            required_confirmations=list(LANCE_INTRADAY_CONFIRMATIONS),
+            data_caveat=caveat,
+        )
+
+    return _lance_state_packet(
+        state="watching_for_setup",
+        reason="Phase 1 Lance context is present; waiting for 2-minute confirmation.",
+        required_confirmations=list(LANCE_INTRADAY_CONFIRMATIONS),
+        data_caveat=caveat,
+    )
+
+
+def _lance_state_packet(
+    *,
+    state: str,
+    reason: str,
+    required_confirmations: list[str] | None = None,
+    entry_reference: float | None = None,
+    risk_reference: float | None = None,
+    target_reference: float | None = None,
+    reference_source: str | None = None,
+    direction: str | None = None,
+    data_caveat: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "state": state,
+        "reason": reason,
+        "required_confirmations": (
+            list(required_confirmations) if required_confirmations is not None else []
+        ),
+        "entry_reference": entry_reference,
+        "risk_reference": risk_reference,
+        "target_reference": target_reference,
+        "reference_source": reference_source,
+        "direction": direction,
+        "data_caveat": data_caveat,
+    }
+
+
+def _lance_phase_one_failures(
+    *,
+    snapshot: dict[str, Any],
+    candidate: dict[str, Any] | None,
+) -> list[str]:
+    failures: list[str] = []
+    universe_status = (
+        _universe_fit_status(snapshot, candidate)
+        if candidate is not None
+        else _liquid_name_status(snapshot)
+    )
+    if universe_status != "PASS":
+        failures.append("liquid-name fit")
+    if _move_status(snapshot) == "FAIL":
+        failures.append("abnormal move")
     if _participation_status(snapshot) != "PASS":
-        return "not_ready_participation"
-    return "not_ready_missing_context"
+        failures.append("RVOL expansion")
+    return failures
+
+
+def _lance_data_quality_blocked(snapshot: dict[str, Any]) -> bool:
+    confidence = snapshot.get("confidence")
+    gap_basis = snapshot.get("gap_basis")
+    if confidence != "OK":
+        return True
+    if gap_basis == "premarket":
+        return False
+    return not (
+        gap_basis == "last_trade"
+        and session_mode_for(snapshot.get("timestamp")) == "MARKET_OPEN"
+    )
 
 
 def _verdict(candidate: dict[str, Any] | None) -> str:

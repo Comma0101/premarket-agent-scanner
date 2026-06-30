@@ -52,6 +52,19 @@ def test_data_caveat_flags_stale_last_trade_with_et_time() -> None:
     )
 
 
+def test_data_caveat_for_market_open_last_trade_does_not_call_it_off_session() -> None:
+    caveat = data_caveat_for(
+        "2026-06-30T15:38:24Z",
+        gap_basis="last_trade",
+        confidence="OK",
+    )
+
+    assert caveat == (
+        "MARKET_OPEN: last_trade regular-session quote vs prior close as of "
+        "Jun 30 11:38 AM ET. Not a premarket gap."
+    )
+
+
 def test_datetime_inputs_are_supported() -> None:
     value = datetime(2026, 6, 30, 8, 28, tzinfo=ZoneInfo("America/New_York"))
 

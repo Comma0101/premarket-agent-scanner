@@ -395,7 +395,8 @@ def test_explain_breitstein_ticker_tool_returns_moment_view():
 
     assert out["ticker"] == "MRVL"
     assert out["verdict"] == "No Phase 1 setup"
-    assert out["moment_state"] == "not_ready_data_quality"
+    assert out["moment_state"] == "blocked_data_quality"
+    assert out["lance_state"]["state"] == "blocked_data_quality"
     assert out["data_card"]["gap_basis"] == "last_trade"
     assert out["data_card"]["confidence"] == "STALE_DATA"
     assert any(item["label"] == "Participation" for item in out["setup_stack"])

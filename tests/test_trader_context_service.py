@@ -135,6 +135,27 @@ class EmptyBarProvider:
         return IntradayBarSeries("HOT", timeframe, [], self.source_name, "empty-fetch")
 
 
+class SignalBarProvider:
+    source_name = "signal-bars"
+
+    def get_bars(
+        self,
+        ticker,
+        timeframe="2Min",
+        start=None,
+        end=None,
+        limit=100,
+    ):
+        bars = [
+            IntradayBar(ticker, "2026-06-29T14:00:00Z", 110, 111, 109, 110, 1_000),
+            IntradayBar(ticker, "2026-06-29T14:02:00Z", 109, 110, 108, 109, 1_000),
+            IntradayBar(ticker, "2026-06-29T14:04:00Z", 108, 109, 107, 108, 1_000),
+            IntradayBar(ticker, "2026-06-29T14:06:00Z", 107, 108, 106, 107, 1_000),
+            IntradayBar(ticker, "2026-06-29T14:08:00Z", 108, 110, 107, 109, 2_000),
+        ]
+        return IntradayBarSeries(ticker, timeframe, bars, self.source_name, "signal-fetch")
+
+
 def test_trader_context_includes_snapshot_and_evidence():
     service = TraderContextService(
         snapshot_service=FakeSnapshotService(),
@@ -183,6 +204,24 @@ def test_trader_context_can_include_technical_packet():
     assert daily["prior_day"]["close"] == 13
     assert daily["consecutive_green_days"] == 2
     assert round(daily["run_up_pct"], 2) == 44.44
+
+
+def test_trader_context_intraday_packet_carries_breitstein_signal():
+    service = TraderContextService(
+        snapshot_service=FakeSnapshotService(),
+        evidence_service=FakeEvidenceService(),
+        bar_provider=SignalBarProvider(),
+    )
+
+    context = service.build_context("HOT", include_intraday=True)
+
+    signal = context["technicals"]["intraday"]["breitstein_signal"]
+    assert signal["ticker"] == "HOT"
+    assert signal["direction"] == "long"
+    assert signal["entry_price"] == 109
+    assert signal["stop_price"] == 106
+    assert signal["vwap_filter_passed"] is True
+    assert signal["volume_2x_confirmed"] is True
 
 
 def test_trader_context_surfaces_missing_optional_technicals_without_inference():

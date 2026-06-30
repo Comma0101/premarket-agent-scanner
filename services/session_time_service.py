@@ -97,6 +97,11 @@ def data_caveat_for(
             "Not a live premarket gap."
         )
     if gap_basis == "last_trade":
+        if mode == "MARKET_OPEN":
+            return (
+                f"{mode}: {basis_label} regular-session quote vs prior close "
+                f"{as_of}. Not a premarket gap."
+            )
         return (
             f"{mode}: {basis_label} vs prior close {as_of}. "
             "Off-session; not a confirmed premarket move."

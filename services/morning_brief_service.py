@@ -26,6 +26,15 @@ WATCH_BUCKETS = [
     "blocked_data_quality",
     "rejected",
 ]
+BLOCKED_MOMENT_STATES = {"not_ready_data_quality", "blocked_data_quality"}
+REJECTED_MOMENT_STATES = {"not_in_play", "invalidated"}
+PROFILE_ACTIVE_MOMENT_STATES = {
+    "ready_for_profile_review",
+    "building_intraday_confirmation",
+    "watching_for_setup",
+    "setup_forming",
+    "triggered_reference",
+}
 
 GUARDRAILS = [
     DISCLAIMER,
@@ -277,7 +286,8 @@ def _selection_candidate(selection: dict[str, Any], ticker: str) -> dict[str, An
 
 
 def _grade_from_view(view: dict[str, Any]) -> str:
-    if view.get("moment_state") == "not_ready_data_quality":
+    moment_state = view.get("moment_state")
+    if moment_state in BLOCKED_MOMENT_STATES | REJECTED_MOMENT_STATES:
         return "REJECT"
     pass_count = sum(
         1
@@ -304,6 +314,8 @@ def _bucket(
         return "blocked_data_quality"
     if confidence != "OK" or gap_basis != "premarket":
         return "blocked_data_quality"
+    if view.get("moment_state") in REJECTED_MOMENT_STATES:
+        return "rejected"
     if grade == "A_WATCH":
         return "primary_watch"
     if grade == "B_WATCH":
@@ -329,7 +341,7 @@ def _sources_triggered(
     triggered: list[str] = []
     if selection_candidate.get("grade") in {"A_WATCH", "B_WATCH", "C_WATCH"}:
         triggered.append("small_cap_scan")
-    if view.get("moment_state") != "not_ready_data_quality":
+    if view.get("moment_state") in PROFILE_ACTIVE_MOMENT_STATES:
         triggered.append(f"profile:{view.get('trader') or 'unknown'}")
     return triggered
 

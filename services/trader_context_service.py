@@ -111,6 +111,8 @@ class TraderContextService:
             technicals = IntradayTechnicalsService()
             ema_9 = technicals.compute_ema(series, 9)
             ema_20 = technicals.compute_ema(series, 20)
+            vwap = analysis.compute_vwap(series)
+            signal = analysis.detect_entry_signal(series, vwap) if series.bars else None
             return {
                 "source": series.source,
                 "fetched_at": series.fetched_at,
@@ -119,9 +121,10 @@ class TraderContextService:
                 "latest_bar": (
                     _intraday_bar_to_dict(series.bars[-1]) if series.bars else None
                 ),
-                "vwap": analysis.compute_vwap(series),
+                "vwap": vwap,
                 "ema_9": _last_value(ema_9),
                 "ema_20": _last_value(ema_20),
+                "breitstein_signal": model_to_dict(signal) if signal else None,
                 "confidence": "OK" if series.bars else "LOW_CONFIDENCE",
                 "missing_fields": [] if series.bars else ["intraday_bars"],
             }
