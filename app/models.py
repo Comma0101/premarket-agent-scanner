@@ -314,6 +314,10 @@ class SmallCapScanOutput:
     candidate_count: int
     candidates: list[SmallCapCandidate]
     notes: list[str] = field(default_factory=list)
+    rejected_count: int = 0
+    rejected: list[SmallCapCandidate] = field(default_factory=list)
+    zero_result_reason: str | None = None
+    relax_suggestions: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -172,6 +172,7 @@ def test_morning_brief_buckets_candidates_and_writes_journal(tmp_path) -> None:
     assert packet["strategy"] == "tim_grittani"
     assert packet["status"] == "OK"
     assert packet["session_mode"] == "PRE_MARKET"
+    assert packet["session_banner"].startswith("PRE_MARKET, Jun 30 8:28 AM ET.")
     assert packet["market_opens_in_minutes"] == 62
     assert packet["session_id"] == "2026-06-30-pre-market"
     assert packet["scanned_count"] == 3
@@ -179,11 +180,20 @@ def test_morning_brief_buckets_candidates_and_writes_journal(tmp_path) -> None:
     assert packet["analyzed_count"] == 3
     assert packet["watchlist"]["primary_watch"][0]["ticker"] == "HOT"
     assert packet["watchlist"]["primary_watch"][0]["grade"] == "A_WATCH"
+    assert packet["watchlist"]["primary_watch"][0]["as_of_et"] == "Jun 30 8:28 AM ET"
+    assert packet["watchlist"]["primary_watch"][0]["as_of_utc"] == "2026-06-30T12:28:00Z"
+    assert packet["watchlist"]["primary_watch"][0]["row_session_mode"] == "PRE_MARKET"
+    assert packet["watchlist"]["primary_watch"][0]["data_caveat"] is None
     assert packet["watchlist"]["primary_watch"][0]["entry_reference"] is None
     assert packet["watchlist"]["monitoring"][0]["ticker"] == "WAIT"
     assert packet["watchlist"]["blocked_data_quality"][0]["ticker"] == "STALE"
+    assert packet["watchlist"]["blocked_data_quality"][0]["data_caveat"] == (
+        "PRE_MARKET: last_trade / STALE_DATA as of Jun 30 8:28 AM ET. "
+        "Not a live premarket gap."
+    )
     assert packet["data_caveats"] == [
-        "STALE: gap_basis=last_trade, confidence=STALE_DATA, as_of=2026-06-30T12:28:00Z"
+        "STALE: PRE_MARKET: last_trade / STALE_DATA as of Jun 30 8:28 AM ET. "
+        "Not a live premarket gap."
     ]
     assert packet["consensus_tickers"] == ["HOT", "WAIT"]
     assert "primary" in packet["brief_summary"]

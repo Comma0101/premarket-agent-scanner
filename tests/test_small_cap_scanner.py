@@ -334,6 +334,59 @@ def test_small_cap_scanner_attaches_evidence_to_candidates():
     assert candidate.evidence.float_shares == 8_000_000
 
 
+def test_small_cap_scanner_hides_rejected_rows_by_default():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[_result(ticker="BAD", confidence="CONFLICT")],
+                notes=[],
+            )
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=None,
+    ).scan(tickers="BAD", preset_name="sykes_small_cap_v0")
+
+    assert output.candidates == []
+    assert output.candidate_count == 0
+    assert output.rejected == []
+    assert output.rejected_count == 0
+    assert output.zero_result_reason == "all_failed_data_quality"
+    assert output.relax_suggestions
+
+
+def test_small_cap_scanner_can_include_rejected_rows_with_reasons():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[_result(ticker="BAD", confidence="CONFLICT")],
+                notes=[],
+            )
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=None,
+    ).scan(tickers="BAD", preset_name="sykes_small_cap_v0", include_rejected=True)
+
+    assert output.candidates == []
+    assert output.rejected_count == 1
+    assert output.rejected[0].ticker == "BAD"
+    assert output.rejected[0].grade == "REJECT"
+    assert "unusable_confidence" in output.rejected[0].matched_signals
+    assert output.zero_result_reason == "all_failed_data_quality"
+    assert any("PRE_MARKET" in item for item in output.relax_suggestions)
+
+
 def test_grade_strong_small_cap_candidate_is_a_watch():
     candidate = grade_small_cap_candidate(
         _result(),

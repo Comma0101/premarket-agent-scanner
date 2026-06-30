@@ -152,6 +152,13 @@ TOOLS: list[dict[str, Any]] = [
                         "remain unknown."
                     ),
                 },
+                "include_rejected": {
+                    "type": "boolean",
+                    "description": (
+                        "Opt in to rejected rows with risk notes and reject reasons. "
+                        "Defaults to false so normal scanner output stays compact."
+                    ),
+                },
                 "all_universes": {
                     "type": "boolean",
                     "description": "Scan every defined universe. Defaults to false.",

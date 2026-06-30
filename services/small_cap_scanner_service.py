@@ -60,11 +60,13 @@ class SmallCapScannerService:
         market: str | None = None,
         market_limit: int | None = None,
         max_workers: int | None = None,
+        include_rejected: bool = False,
     ) -> SmallCapScanOutput:
         preset = self.preset_service.get_preset(preset_name)
         run_ids: list[str] = []
         notes = list(preset.notes)
         candidates_by_ticker: dict[str, SmallCapCandidate] = {}
+        rejected_by_ticker: dict[str, SmallCapCandidate] = {}
         if market:
             if any([universe, watchlist, tickers, all_universes]):
                 raise ValueError("Use market by itself; do not combine it with universe/watchlist/tickers/all.")
@@ -111,12 +113,19 @@ class SmallCapScannerService:
                 missing_fields=list(preset.missing_fields),
             )
             if candidate.grade == "REJECT":
+                existing_rejected = rejected_by_ticker.get(candidate.ticker)
+                if existing_rejected is None or candidate.score > existing_rejected.score:
+                    rejected_by_ticker[candidate.ticker] = candidate
                 continue
 
             existing = candidates_by_ticker.get(candidate.ticker)
             if existing is None or candidate.score > existing.score:
                 candidates_by_ticker[candidate.ticker] = candidate
 
+        rejected = sorted(
+            rejected_by_ticker.values(),
+            key=lambda candidate: (-candidate.score, candidate.ticker),
+        )
         candidates = sorted(
             candidates_by_ticker.values(),
             key=lambda candidate: candidate.score,
@@ -132,12 +141,23 @@ class SmallCapScannerService:
                 key=lambda candidate: candidate.score,
                 reverse=True,
             )
+        zero_result_reason = None
+        relax_suggestions: list[str] = []
+        if not candidates:
+            zero_result_reason, relax_suggestions = _empty_state_guidance(
+                scan_results=scan_run.results,
+                rejected=rejected,
+            )
         return SmallCapScanOutput(
             preset=preset.name,
             run_ids=run_ids,
             candidate_count=len(candidates),
             candidates=candidates,
             notes=notes,
+            rejected_count=len(rejected) if include_rejected else 0,
+            rejected=rejected if include_rejected else [],
+            zero_result_reason=zero_result_reason,
+            relax_suggestions=relax_suggestions,
         )
 
     def _market_universe_provider(self):
@@ -159,6 +179,43 @@ def _union_cap_bounds(cap_tiers: list[str]) -> tuple[float, float | None]:
 
     upper = max(highs)
     return min(lows), (None if upper == float("inf") else upper)
+
+
+def _empty_state_guidance(
+    *,
+    scan_results: list[ScannerResult],
+    rejected: list[SmallCapCandidate],
+) -> tuple[str, list[str]]:
+    suggestions = [
+        "Review rejected rows with include_rejected=True to see which filter dropped each name.",
+        "Check missing_fields before relaxing scanner thresholds.",
+    ]
+    if not scan_results and not rejected:
+        suggestions.append(
+            "If the preset is too narrow, lower min_gap_abs or min_rel_volume before re-running."
+        )
+        return "all_filtered", suggestions
+
+    data_quality_drops = sum(
+        1
+        for candidate in rejected
+        if "unusable_confidence" in candidate.matched_signals
+        or any(
+            note.startswith("Rejected because confidence is")
+            for note in candidate.risk_notes
+        )
+    )
+    if rejected and data_quality_drops >= len(rejected):
+        suggestions.append(
+            "Run during PRE_MARKET for premarket gap_basis eligibility; "
+            "last_trade quotes rarely carry a clean confidence label."
+        )
+        return "all_failed_data_quality", suggestions
+
+    suggestions.append(
+        "If the preset is too narrow, lower min_gap_abs or min_rel_volume before re-running."
+    )
+    return "all_filtered", suggestions
 
 
 def grade_small_cap_candidate(

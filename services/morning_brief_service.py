@@ -9,6 +9,12 @@ from zoneinfo import ZoneInfo
 from app.config import BASE_DIR
 from app.models import utc_now_iso
 from services.desk_explainer import DISCLAIMER
+from services.session_time_service import (
+    data_caveat_for,
+    format_et,
+    session_banner_for,
+    session_mode_for,
+)
 
 
 WATCH_BUCKETS = [
@@ -83,13 +89,8 @@ class MorningBriefService:
         ]
         for candidate in candidates:
             watchlist_packet[candidate["bucket"]].append(candidate)
-            if candidate["bucket"] == "blocked_data_quality":
-                data_caveats.append(
-                    (
-                        f"{candidate['ticker']}: gap_basis={candidate['gap_basis']}, "
-                        f"confidence={candidate['confidence']}, as_of={candidate['as_of']}"
-                    )
-                )
+            if candidate["data_caveat"]:
+                data_caveats.append(f"{candidate['ticker']}: {candidate['data_caveat']}")
 
         for bucket in WATCH_BUCKETS:
             watchlist_packet[bucket].sort(
@@ -107,6 +108,7 @@ class MorningBriefService:
             "strategy": profile,
             "status": "OK",
             "session_mode": session_mode,
+            "session_banner": session_banner_for(now_ny),
             "market_opens_in_minutes": _market_opens_in_minutes(now_ny),
             "brief_summary": _brief_summary(watchlist_packet, data_caveats),
             "watchlist": watchlist_packet,
@@ -208,6 +210,12 @@ def _brief_candidate(
     )
     scanners_triggered = _sources_triggered(selection_candidate, view)
     consensus_score = len(scanners_triggered)
+    as_of = data_quality.get("as_of") or data_card.get("as_of")
+    data_caveat = data_caveat_for(
+        as_of,
+        gap_basis=gap_basis,
+        confidence=confidence,
+    )
 
     return {
         "ticker": ticker,
@@ -223,7 +231,12 @@ def _brief_candidate(
         "dollar_volume": _dollar_volume(data_card),
         "market_cap": data_card.get("market_cap"),
         "confidence": confidence,
-        "as_of": data_quality.get("as_of") or data_card.get("as_of"),
+        "as_of": as_of,
+        "as_of_et": format_et(as_of),
+        "as_of_utc": as_of,
+        "session_mode": session_mode_for(as_of),
+        "row_session_mode": session_mode_for(as_of),
+        "data_caveat": data_caveat,
         "sources": list(data_quality.get("sources") or []),
         "consensus_score": consensus_score,
         "scanners_triggered": scanners_triggered,

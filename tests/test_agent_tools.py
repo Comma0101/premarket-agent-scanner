@@ -125,9 +125,14 @@ def test_scan_small_caps_tool_returns_candidates():
     )
 
     assert out["candidate_count"] == 1
+    assert out["session_banner"].startswith("PRE_MARKET, Jun 28 8:00 AM ET.")
     assert out["candidates"][0]["ticker"] == "HOT"
     assert out["candidates"][0]["grade"] == "A_WATCH"
     assert out["candidates"][0]["gap_basis"] == "premarket"
+    assert out["candidates"][0]["as_of_et"] == "Jun 28 8:00 AM ET"
+    assert out["candidates"][0]["as_of_utc"] == "2026-06-28T12:00:00Z"
+    assert out["candidates"][0]["session_mode"] == "PRE_MARKET"
+    assert out["candidates"][0]["data_caveat"] is None
     assert out["candidates"][0]["missing_fields"] == ["short_interest"]
     assert out["candidates"][0]["evidence"]["float_shares"] == 8_000_000
     assert out["candidates"][0]["evidence"]["catalysts"][0]["catalyst_quality"] == "hard"
@@ -135,6 +140,63 @@ def test_scan_small_caps_tool_returns_candidates():
     assert out["candidates"][0]["evidence"]["is_low_float"] is True
     assert out["candidates"][0]["evidence"]["float_rotation"] == 2.0
     assert "short_interest" in out["candidates"][0]["evidence"]["missing_fields"]
+    assert "rejected" not in out
+    assert "rejected_count" not in out
+
+
+def test_scan_small_caps_tool_can_include_rejected_rows():
+    from app.models import SmallCapCandidate, SmallCapScanOutput
+
+    class FakeSmallCapService:
+        def scan(self, **kwargs):
+            assert kwargs["include_rejected"] is True
+            return SmallCapScanOutput(
+                preset=kwargs["preset_name"],
+                run_ids=["run1"],
+                candidate_count=0,
+                candidates=[],
+                notes=[],
+                rejected_count=1,
+                rejected=[
+                    SmallCapCandidate(
+                        ticker="BAD",
+                        name=None,
+                        market_cap=25_000_000,
+                        gap_pct=12.0,
+                        gap_dollar=0.72,
+                        gap_basis="last_trade",
+                        volume=2_000_000,
+                        rel_volume=5.0,
+                        confidence="STALE_DATA",
+                        score=0,
+                        grade="REJECT",
+                        matched_signals=["unusable_confidence"],
+                        risk_notes=["Rejected because confidence is STALE_DATA."],
+                        sources=["fake"],
+                        timestamp="2026-06-29T23:30:00Z",
+                    )
+                ],
+                zero_result_reason="all_failed_data_quality",
+                relax_suggestions=["Run during PRE_MARKET for clean gap data."],
+            )
+
+    out = tools.scan_small_caps(
+        tickers="BAD",
+        preset_name="sykes_small_cap_v0",
+        include_rejected=True,
+        service=FakeSmallCapService(),
+    )
+
+    assert out["candidate_count"] == 0
+    assert out["rejected_count"] == 1
+    assert out["rejected"][0]["ticker"] == "BAD"
+    assert out["rejected"][0]["as_of_et"] == "Jun 29 7:30 PM ET"
+    assert out["rejected"][0]["session_mode"] == "POST_MARKET"
+    assert out["rejected"][0]["data_caveat"].startswith(
+        "POST_MARKET: last_trade / STALE_DATA"
+    )
+    assert out["zero_result_reason"] == "all_failed_data_quality"
+    assert out["relax_suggestions"] == ["Run during PRE_MARKET for clean gap data."]
 
 
 def test_scan_small_caps_tool_accepts_market_selection():

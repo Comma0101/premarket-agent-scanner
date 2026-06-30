@@ -6,6 +6,11 @@ import typer
 
 from app.models import SmallCapCandidate, SmallCapEvidence
 from cli._render import format_gap, format_market_cap, format_price, format_rvol
+from services.session_time_service import (
+    data_caveat_for,
+    parse_iso_utc,
+    session_banner_for,
+)
 from services.small_cap_scanner_service import SmallCapScannerService
 
 app = typer.Typer(add_completion=False, help="Small-cap discovery scanner.")
@@ -36,6 +41,11 @@ def main(
         "--max-workers",
         help="Bounded worker count for broad market scans.",
     ),
+    include_rejected: bool = typer.Option(
+        False,
+        "--include-rejected",
+        help="Show rejected rows with reject reasons and data caveats.",
+    ),
     all_universes: bool = typer.Option(False, "--all", help="Scan every defined universe."),
 ) -> None:
     if not any([universe, watchlist, tickers, market, all_universes]):
@@ -53,6 +63,7 @@ def main(
             market_limit=market_limit,
             max_workers=max_workers,
             all_universes=all_universes,
+            include_rejected=include_rejected,
         )
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -68,6 +79,7 @@ def _render(output) -> None:
         return
 
     console = Console()
+    console.print(f"[dim]Session: {_session_banner(output)}[/dim]")
     table = Table(title=f"Small-cap scan [{output.preset}]", header_style="bold")
     table.add_column("Ticker", style="bold cyan")
     table.add_column("Grade")
@@ -94,12 +106,15 @@ def _render(output) -> None:
 
     console.print(table)
     console.print(f"[dim]{output.candidate_count} candidate(s).[/dim]")
+    _render_empty_state_rich(console, output)
+    _render_rejected_rich(console, output)
     for note in output.notes:
         console.print(f"[dim]note: {note}[/dim]")
 
 
 def _render_plain(output) -> None:
     print(f"Small-cap scan [{output.preset}]")
+    print(f"Session: {_session_banner(output)}")
     if not output.candidates:
         print("No candidates.")
     for item in output.candidates:
@@ -119,8 +134,77 @@ def _render_plain(output) -> None:
             f"missing={_format_candidate_missing_fields(item)}"
         )
     print(f"{output.candidate_count} candidate(s).")
+    _render_empty_state_plain(output)
+    _render_rejected_plain(output)
     for note in output.notes:
         print(f"note: {note}")
+
+
+def _render_empty_state_rich(console, output) -> None:
+    if not output.zero_result_reason:
+        return
+    console.print(f"[dim]zero_result_reason: {output.zero_result_reason}[/dim]")
+    for suggestion in output.relax_suggestions:
+        console.print(f"[dim]suggestion: {suggestion}[/dim]")
+
+
+def _render_rejected_rich(console, output) -> None:
+    if not output.rejected:
+        return
+    console.print(f"[dim]{output.rejected_count} rejected candidate(s).[/dim]")
+    for item in output.rejected:
+        caveat = data_caveat_for(
+            item.timestamp,
+            gap_basis=item.gap_basis,
+            confidence=item.confidence,
+        )
+        suffix = f" | {caveat}" if caveat else ""
+        console.print(
+            f"[dim]reject {item.ticker}: score={item.score} "
+            f"reasons={'; '.join(item.risk_notes) or '-'}{suffix}[/dim]"
+        )
+
+
+def _render_empty_state_plain(output) -> None:
+    if not output.zero_result_reason:
+        return
+    print(f"zero_result_reason: {output.zero_result_reason}")
+    for suggestion in output.relax_suggestions:
+        print(f"suggestion: {suggestion}")
+
+
+def _render_rejected_plain(output) -> None:
+    if not output.rejected:
+        return
+    print(f"{output.rejected_count} rejected candidate(s).")
+    for item in output.rejected:
+        caveat = data_caveat_for(
+            item.timestamp,
+            gap_basis=item.gap_basis,
+            confidence=item.confidence,
+        )
+        suffix = f" | {caveat}" if caveat else ""
+        print(
+            f"reject {item.ticker}: score={item.score} "
+            f"reasons={'; '.join(item.risk_notes) or '-'}{suffix}"
+        )
+
+
+def _session_banner(output) -> str:
+    return session_banner_for(_latest_candidate_timestamp(output))
+
+
+def _latest_candidate_timestamp(output) -> str | None:
+    latest_raw: str | None = None
+    latest_dt = None
+    for candidate in [*output.candidates, *output.rejected]:
+        parsed = parse_iso_utc(candidate.timestamp)
+        if parsed is None:
+            continue
+        if latest_dt is None or parsed > latest_dt:
+            latest_dt = parsed
+            latest_raw = candidate.timestamp
+    return latest_raw
 
 
 def _format_missing_fields(missing_fields: list[str]) -> str:

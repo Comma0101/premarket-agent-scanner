@@ -28,6 +28,13 @@ from app.models import (
     utc_now_iso,
 )
 from services.scanner_service import ScannerService
+from services.session_time_service import (
+    data_caveat_for,
+    format_et,
+    parse_iso_utc,
+    session_banner_for,
+    session_mode_for,
+)
 from services.snapshot_service import SnapshotService
 from services.universe_service import UniverseService
 
@@ -126,6 +133,7 @@ def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
         if candidate.evidence is not None
         else candidate.missing_fields
     )
+    timestamp = getattr(candidate, "timestamp", None)
     return {
         "ticker": candidate.ticker,
         "name": candidate.name,
@@ -144,7 +152,29 @@ def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
         "sources": candidate.sources,
         "evidence": _small_cap_evidence_to_dict(candidate.evidence),
         "timestamp": candidate.timestamp,
+        "as_of_et": format_et(timestamp),
+        "as_of_utc": timestamp,
+        "session_mode": session_mode_for(timestamp),
+        "data_caveat": data_caveat_for(
+            timestamp,
+            gap_basis=candidate.gap_basis,
+            confidence=candidate.confidence,
+        ),
     }
+
+
+def _latest_candidate_timestamp(candidates: list[Any]) -> str | None:
+    latest_raw: str | None = None
+    latest_dt = None
+    for candidate in candidates:
+        raw = getattr(candidate, "timestamp", None)
+        parsed = parse_iso_utc(raw)
+        if parsed is None:
+            continue
+        if latest_dt is None or parsed > latest_dt:
+            latest_dt = parsed
+            latest_raw = raw
+    return latest_raw
 
 
 def _breitstein_candidate_to_dict(candidate: Any) -> dict[str, Any]:
@@ -345,6 +375,7 @@ def scan_small_caps(
     market_limit: int | None = None,
     max_workers: int | None = None,
     refresh_catalysts: bool = False,
+    include_rejected: bool = False,
     service: Any | None = None,
 ) -> dict[str, Any]:
     """Run the small-cap scanner and return JSON-safe candidates."""
@@ -379,6 +410,7 @@ def scan_small_caps(
             market=market,
             market_limit=market_limit,
             max_workers=max_workers,
+            include_rejected=include_rejected,
         )
     except (KeyError, ValueError) as exc:
         return {"error": str(exc)}
@@ -393,15 +425,29 @@ def scan_small_caps(
             ),
         )
 
-    return {
+    candidates = list(output.candidates)
+    rejected = list(getattr(output, "rejected", []))
+    response = {
         "preset": output.preset,
         "run_ids": output.run_ids,
         "candidate_count": output.candidate_count,
         "candidates": [
-            _small_cap_candidate_to_dict(candidate) for candidate in output.candidates
+            _small_cap_candidate_to_dict(candidate) for candidate in candidates
         ],
+        "session_banner": session_banner_for(
+            _latest_candidate_timestamp(candidates + rejected)
+        ),
         "notes": notes,
     }
+    if include_rejected:
+        response["rejected_count"] = getattr(output, "rejected_count", len(rejected))
+        response["rejected"] = [
+            _small_cap_candidate_to_dict(candidate) for candidate in rejected
+        ]
+    if getattr(output, "zero_result_reason", None):
+        response["zero_result_reason"] = output.zero_result_reason
+        response["relax_suggestions"] = list(output.relax_suggestions)
+    return response
 
 
 def scan_breitstein(
