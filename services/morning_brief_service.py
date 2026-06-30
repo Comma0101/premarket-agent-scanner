@@ -12,6 +12,7 @@ from services.desk_explainer import DISCLAIMER
 from services.session_time_service import (
     data_caveat_for,
     format_et,
+    is_active_halt,
     session_banner_for,
     session_mode_for,
 )
@@ -201,12 +202,14 @@ def _brief_candidate(
     grade = selection_candidate.get("grade") or _grade_from_view(view)
     confidence = data_quality.get("confidence") or data_card.get("confidence")
     gap_basis = data_quality.get("gap_basis") or data_card.get("gap_basis")
+    halt_status = data_quality.get("halt_status") or data_card.get("halt_status")
     bucket = _bucket(
         confidence=confidence,
         gap_basis=gap_basis,
         grade=grade,
         view=view,
         missing_fields=item.get("missing_fields") or [],
+        halt_status=halt_status,
     )
     scanners_triggered = _sources_triggered(selection_candidate, view)
     consensus_score = len(scanners_triggered)
@@ -215,6 +218,7 @@ def _brief_candidate(
         as_of,
         gap_basis=gap_basis,
         confidence=confidence,
+        halt_status=halt_status,
     )
 
     return {
@@ -231,6 +235,7 @@ def _brief_candidate(
         "dollar_volume": _dollar_volume(data_card),
         "market_cap": data_card.get("market_cap"),
         "confidence": confidence,
+        "halt_status": halt_status,
         "as_of": as_of,
         "as_of_et": format_et(as_of),
         "as_of_utc": as_of,
@@ -293,7 +298,10 @@ def _bucket(
     grade: str,
     view: dict[str, Any],
     missing_fields: list[str],
+    halt_status: object | None = None,
 ) -> str:
+    if is_active_halt(halt_status):
+        return "blocked_data_quality"
     if confidence != "OK" or gap_basis != "premarket":
         return "blocked_data_quality"
     if grade == "A_WATCH":

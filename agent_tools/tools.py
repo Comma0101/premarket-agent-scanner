@@ -21,9 +21,11 @@ from app.models import (
     FirstRedDaySignal,
     FormerRunnerEvent,
     GrittaniPanicSignal,
+    HaltStatus,
     IntradayBar,
     ScannerResult,
     SmallCapEvidence,
+    model_to_dict,
     make_scan_filters,
     utc_now_iso,
 )
@@ -31,6 +33,7 @@ from services.scanner_service import ScannerService
 from services.session_time_service import (
     data_caveat_for,
     format_et,
+    halt_caveat_for,
     parse_iso_utc,
     session_banner_for,
     session_mode_for,
@@ -57,6 +60,8 @@ def _result_to_dict(result: ScannerResult) -> dict[str, Any]:
         "notes": result.notes,
         "sources": result.sources,
         "timestamp": result.timestamp,
+        "halt_status": _halt_status_to_dict(result.halt_status),
+        "data_caveat": halt_caveat_for(result.halt_status),
     }
 
 
@@ -152,6 +157,7 @@ def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
         "sources": candidate.sources,
         "evidence": _small_cap_evidence_to_dict(candidate.evidence),
         "timestamp": candidate.timestamp,
+        "halt_status": _halt_status_to_dict(candidate.halt_status),
         "as_of_et": format_et(timestamp),
         "as_of_utc": timestamp,
         "session_mode": session_mode_for(timestamp),
@@ -159,8 +165,15 @@ def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
             timestamp,
             gap_basis=candidate.gap_basis,
             confidence=candidate.confidence,
+            halt_status=candidate.halt_status,
         ),
     }
+
+
+def _halt_status_to_dict(halt_status: HaltStatus | None) -> dict[str, Any] | None:
+    if halt_status is None:
+        return None
+    return model_to_dict(halt_status)
 
 
 def _latest_candidate_timestamp(candidates: list[Any]) -> str | None:
@@ -943,6 +956,7 @@ def get_ticker_snapshot(
         "confidence": snap.confidence,
         "data_status": snap.data_status,
         "provider_failures": dict(snap.provider_failures),
+        "halt_status": _halt_status_to_dict(snap.halt_status),
         "sources": snap.sources,
         "timestamp": snap.timestamp,
         "notes": snap.notes,

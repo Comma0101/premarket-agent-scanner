@@ -87,6 +87,20 @@ class ProviderPriceData:
 
 
 @dataclass
+class HaltStatus:
+    ticker: str
+    status: str
+    is_active: bool
+    reason_code: str | None = None
+    reason: str | None = None
+    halt_time: str | None = None
+    resume_time: str | None = None
+    source: str | None = None
+    fetched_at: str | None = None
+    error: str | None = None
+
+
+@dataclass
 class CombinedSnapshot:
     ticker: str
     timestamp: str | None
@@ -113,6 +127,7 @@ class CombinedSnapshot:
     provider_failures: dict[str, str] = field(default_factory=dict)
     # Top-level data pipeline summary; see `DataStatus` literal above.
     data_status: DataStatus = "live"
+    halt_status: HaltStatus | None = None
 
 
 @dataclass
@@ -211,6 +226,7 @@ class ScannerResult:
     gap_basis: str | None = None
     sources: list[str] = field(default_factory=list)
     timestamp: str | None = None
+    halt_status: HaltStatus | None = None
     created_at: str = field(default_factory=utc_now_iso)
 
 
@@ -320,6 +336,7 @@ class SmallCapCandidate:
     sources: list[str] = field(default_factory=list)
     evidence: SmallCapEvidence | None = None
     timestamp: str | None = None
+    halt_status: HaltStatus | None = None
 
 
 @dataclass

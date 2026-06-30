@@ -13,7 +13,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from app.models import CombinedSnapshot, ProviderPriceData, utc_now_iso
+from app.models import CombinedSnapshot, HaltStatus, ProviderPriceData, utc_now_iso
 from providers.yfinance_provider import YFinanceProvider
 
 # If yfinance and Alpaca disagree on price by more than this fraction, the
@@ -29,10 +29,12 @@ class SnapshotService:
         self,
         yf_provider: YFinanceProvider | None = None,
         alpaca_provider: Any | None = None,
+        halt_provider: Any | None = None,
     ) -> None:
         self.yf_provider = yf_provider or YFinanceProvider()
         # Alpaca is optional; passing None keeps the scanner yfinance-only.
         self.alpaca_provider = alpaca_provider
+        self.halt_provider = halt_provider
 
     @classmethod
     def with_configured_providers(cls, db_path: str | None = None) -> "SnapshotService":
@@ -42,11 +44,13 @@ class SnapshotService:
         service, so behavior is unchanged until an API key is provided.
         """
         from providers.alpaca_provider import AlpacaProvider
+        from providers.nasdaq_halt_provider import NasdaqHaltProvider
 
         alpaca = AlpacaProvider(db_path=db_path)
         return cls(
             yf_provider=YFinanceProvider(),
             alpaca_provider=alpaca if alpaca.is_configured else None,
+            halt_provider=NasdaqHaltProvider(),
         )
 
     def build_snapshot(self, ticker: str) -> CombinedSnapshot:
@@ -65,13 +69,14 @@ class SnapshotService:
                     error=str(exc),
                 )
 
-        return self._combine(normalized, yf_data, alpaca_data)
+        return self._combine(normalized, yf_data, alpaca_data, self._halt_status(normalized))
 
     def _combine(
         self,
         ticker: str,
         yf_data: ProviderPriceData,
         alpaca_data: ProviderPriceData | None,
+        halt_status: HaltStatus | None,
     ) -> CombinedSnapshot:
         sources: list[str] = []
         notes: list[str] = []
@@ -115,6 +120,13 @@ class SnapshotService:
             notes.append(f"alpaca: {alpaca_data.error}")
             provider_failures[alpaca_data.source] = alpaca_data.error
 
+        if halt_status is not None:
+            if halt_status.error:
+                notes.append(f"nasdaq_halts: {halt_status.error}")
+            elif halt_status.is_active:
+                code = f" ({halt_status.reason_code})" if halt_status.reason_code else ""
+                notes.append(f"nasdaq_halts: active halt{code}.")
+
         confidence = self._assign_confidence(
             previous_close=previous_close,
             premarket_price=premarket_price,
@@ -153,10 +165,26 @@ class SnapshotService:
             alpaca_data=alpaca_data,
             provider_failures=provider_failures,
             data_status=data_status,
+            halt_status=halt_status,
         )
         snapshot.market_cap = market_cap
         snapshot.average_volume = average_volume
         return snapshot
+
+    def _halt_status(self, ticker: str) -> HaltStatus | None:
+        if self.halt_provider is None:
+            return None
+        try:
+            return self.halt_provider.get_halt_status(ticker)
+        except Exception as exc:
+            return HaltStatus(
+                ticker=ticker,
+                status="UNKNOWN",
+                is_active=False,
+                source=getattr(self.halt_provider, "source_name", "nasdaq_trader_halts"),
+                fetched_at=utc_now_iso(),
+                error=str(exc),
+            )
 
     @staticmethod
     def _assign_data_status(

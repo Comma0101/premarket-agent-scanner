@@ -336,6 +336,31 @@ def test_get_ticker_snapshot_surfaces_provider_failures_and_data_status():
     assert any("yfinance:" in note for note in out["notes"])
 
 
+def test_get_ticker_snapshot_surfaces_halt_status():
+    from app.models import HaltStatus
+
+    class FakeHaltProvider:
+        def get_halt_status(self, ticker):
+            return HaltStatus(
+                ticker=ticker,
+                status="HALTED_REGULATORY",
+                is_active=True,
+                reason_code="T1",
+                halt_time="2026-06-30T13:35:00+00:00",
+                source="fake_halts",
+            )
+
+    svc = SnapshotService(
+        yf_provider=FakePriceProvider({"HALT": _quote("HALT", 10.0, 11.0, 50_000_000)}),
+        halt_provider=FakeHaltProvider(),
+    )
+
+    out = tools.get_ticker_snapshot(ticker="HALT", snapshot_service=svc)
+
+    assert out["halt_status"]["is_active"] is True
+    assert out["halt_status"]["reason_code"] == "T1"
+
+
 def test_explain_breitstein_ticker_tool_returns_moment_view():
     class FakeBreitsteinService:
         def scan(self, **kwargs):

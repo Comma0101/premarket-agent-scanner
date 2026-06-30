@@ -87,6 +87,7 @@ def _data_card(snapshot: dict[str, Any]) -> dict[str, Any]:
         "market_cap": snapshot.get("market_cap"),
         "gap_basis": snapshot.get("gap_basis"),
         "confidence": snapshot.get("confidence"),
+        "halt_status": snapshot.get("halt_status"),
     }
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import is_dataclass
 from datetime import datetime, time, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -74,8 +75,13 @@ def data_caveat_for(
     *,
     gap_basis: str | None,
     confidence: str | None,
+    halt_status: object | None = None,
     now: datetime | None = None,
 ) -> str | None:
+    halt_caveat = halt_caveat_for(halt_status)
+    if halt_caveat is not None:
+        return halt_caveat
+
     parsed = _coerce(timestamp, now=now)
     mode = session_mode_for(parsed)
     et_label = format_et(parsed)
@@ -98,6 +104,32 @@ def data_caveat_for(
     if gap_basis is None:
         return f"{mode}: no effective price / {confidence_label} {as_of}."
     return f"{mode}: {basis_label} / {confidence_label} {as_of}."
+
+
+def halt_caveat_for(halt_status: object | None) -> str | None:
+    if not is_active_halt(halt_status):
+        return None
+    halt_time = _halt_value(halt_status, "halt_time")
+    reason_code = _halt_value(halt_status, "reason_code")
+    status = _halt_value(halt_status, "status") or "HALTED"
+    et_label = format_et(str(halt_time)) if halt_time else None
+    code = f" {reason_code}" if reason_code else ""
+    as_of = f" as of {et_label}" if et_label else ""
+    return f"HALTED{code}{as_of}: {status}. Verify halt/resume status before acting."
+
+
+def is_active_halt(halt_status: object | None) -> bool:
+    return bool(_halt_value(halt_status, "is_active"))
+
+
+def _halt_value(halt_status: object | None, key: str) -> object | None:
+    if halt_status is None:
+        return None
+    if isinstance(halt_status, dict):
+        return halt_status.get(key)
+    if is_dataclass(halt_status) or hasattr(halt_status, key):
+        return getattr(halt_status, key, None)
+    return None
 
 
 def _session_suffix(mode: SessionMode) -> str:

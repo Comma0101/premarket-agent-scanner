@@ -157,6 +157,7 @@ def _render_rejected_rich(console, output) -> None:
             item.timestamp,
             gap_basis=item.gap_basis,
             confidence=item.confidence,
+            halt_status=item.halt_status,
         )
         suffix = f" | {caveat}" if caveat else ""
         console.print(
@@ -182,6 +183,7 @@ def _render_rejected_plain(output) -> None:
             item.timestamp,
             gap_basis=item.gap_basis,
             confidence=item.confidence,
+            halt_status=item.halt_status,
         )
         suffix = f" | {caveat}" if caveat else ""
         print(

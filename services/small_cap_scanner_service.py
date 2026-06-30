@@ -229,6 +229,20 @@ def grade_small_cap_candidate(
     provided_missing_fields = list(missing_fields)
     has_absolute_volume_floor = False
 
+    if result.halt_status is not None and result.halt_status.is_active:
+        matched.append("active_halt")
+        code = f" ({result.halt_status.reason_code})" if result.halt_status.reason_code else ""
+        risk_notes.append(f"Active trading halt{code}; verify halt/resume status before acting.")
+        risk_notes.extend(_missing_field_notes(provided_missing_fields))
+        return _candidate(
+            result,
+            0,
+            "REJECT",
+            matched,
+            provided_missing_fields,
+            risk_notes,
+        )
+
     if result.confidence in UNUSABLE_CONFIDENCE:
         matched.append("unusable_confidence")
         risk_notes.append(f"Rejected because confidence is {result.confidence}.")
@@ -463,4 +477,5 @@ def _candidate(
         risk_notes=risk_notes,
         sources=list(result.sources),
         timestamp=result.timestamp,
+        halt_status=result.halt_status,
     )

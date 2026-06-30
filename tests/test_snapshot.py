@@ -7,7 +7,7 @@ as it would be with live providers.
 
 from __future__ import annotations
 
-from app.models import ProviderPriceData, utc_now_iso
+from app.models import HaltStatus, ProviderPriceData, utc_now_iso
 from services.snapshot_service import SnapshotService
 
 
@@ -50,6 +50,19 @@ def _service(yf_data, alpaca_data):
         yf_provider=FakeProvider("yfinance", yf_data),
         alpaca_provider=FakeProvider("alpaca", alpaca_data),
     )
+
+
+class FakeHaltProvider:
+    def get_halt_status(self, ticker):
+        return HaltStatus(
+            ticker=ticker,
+            status="HALTED_REGULATORY",
+            is_active=True,
+            reason_code="T1",
+            halt_time="2026-06-30T13:35:00+00:00",
+            source="fake_halts",
+            fetched_at="2026-06-30T13:36:00+00:00",
+        )
 
 
 def test_agreeing_sources_are_ok_with_two_sources():
@@ -181,3 +194,19 @@ def test_snapshot_provider_failures_preserve_existing_confidence_label():
     assert snap.confidence == "OK"
     assert snap.data_status == "partial"
     assert snap.provider_failures == {"yfinance": "DNS failure for guce.yahoo.com"}
+
+
+def test_snapshot_attaches_halt_status_without_changing_price_confidence():
+    service = SnapshotService(
+        yf_provider=FakeProvider("yfinance", _yf(100.0, 105.0)),
+        alpaca_provider=None,
+        halt_provider=FakeHaltProvider(),
+    )
+
+    snap = service.build_snapshot("HALT")
+
+    assert snap.confidence == "OK"
+    assert snap.halt_status is not None
+    assert snap.halt_status.is_active is True
+    assert snap.halt_status.reason_code == "T1"
+    assert any("halt" in note.lower() for note in snap.notes)

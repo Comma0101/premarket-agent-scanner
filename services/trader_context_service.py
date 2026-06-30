@@ -10,6 +10,7 @@ from app.models import (
     IntradayBar,
     SmallCapCandidate,
     SmallCapEvidence,
+    model_to_dict,
     utc_now_iso,
 )
 from services.scanner_service import (
@@ -200,6 +201,9 @@ def _snapshot_to_dict(snapshot: CombinedSnapshot) -> dict[str, Any]:
         "volume": snapshot.volume,
         "rel_volume": compute_rel_volume(snapshot.volume, snapshot.average_volume),
         "confidence": snapshot.confidence,
+        "data_status": snapshot.data_status,
+        "provider_failures": dict(snapshot.provider_failures),
+        "halt_status": model_to_dict(snapshot.halt_status) if snapshot.halt_status else None,
         "sources": list(snapshot.sources),
         "timestamp": snapshot.timestamp,
         "notes": list(snapshot.notes),
@@ -225,6 +229,7 @@ def _candidate_from_snapshot(
         missing_fields=list(DEFAULT_EVIDENCE_FIELDS),
         sources=list(snapshot.sources),
         timestamp=snapshot.timestamp,
+        halt_status=snapshot.halt_status,
     )
 
 

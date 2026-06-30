@@ -114,6 +114,7 @@ def _desk_item(
     verdict: str,
     moment_state: str,
     setup_stack: list[dict[str, str]],
+    halt_status: dict | None = None,
 ) -> dict:
     return {
         "ticker": ticker,
@@ -122,6 +123,7 @@ def _desk_item(
             "confidence": confidence,
             "as_of": "2026-06-30T12:28:00Z",
             "sources": ["fake"],
+            "halt_status": halt_status,
         },
         "views": {
             "tim_grittani": {
@@ -142,6 +144,7 @@ def _desk_item(
                     "rel_volume": rvol,
                     "market_cap": market_cap,
                     "confidence": confidence,
+                    "halt_status": halt_status,
                 },
                 "setup_stack": setup_stack,
                 "what_we_lack": missing_fields,
@@ -152,6 +155,70 @@ def _desk_item(
         "missing_fields": missing_fields,
         "errors": [],
     }
+
+
+class HaltedDeskRunService:
+    def run(self, **kwargs):
+        halt_status = {
+            "ticker": "HALT",
+            "status": "HALTED_REGULATORY",
+            "is_active": True,
+            "reason_code": "T1",
+            "halt_time": "2026-06-30T13:35:00+00:00",
+            "source": "fake_halts",
+        }
+        return {
+            "generated_at": "2026-06-30T13:40:00Z",
+            "ticker_count": 1,
+            "selection": {
+                "source": "market_scan",
+                "candidate_count": 1,
+                "candidates": [
+                    {
+                        "ticker": "HALT",
+                        "grade": "A_WATCH",
+                        "score": 95,
+                        "gap_basis": "premarket",
+                        "confidence": "OK",
+                        "risk_notes": [],
+                    }
+                ],
+            },
+            "tickers": [
+                _desk_item(
+                    ticker="HALT",
+                    confidence="OK",
+                    gap_basis="premarket",
+                    gap_pct=18.4,
+                    rvol=6.2,
+                    market_cap=75_000_000.0,
+                    missing_fields=[],
+                    verdict="Context ready",
+                    moment_state="ready_for_profile_review",
+                    setup_stack=[{"label": "Data quality", "status": "PASS"}],
+                    halt_status=halt_status,
+                )
+            ],
+            "notes": [],
+        }
+
+
+def test_morning_brief_blocks_active_halts_with_caveat(tmp_path) -> None:
+    service = MorningBriefService(
+        desk_service=HaltedDeskRunService(),
+        journal_dir=tmp_path,
+        now_provider=lambda: datetime(
+            2026, 6, 30, 9, 40, tzinfo=ZoneInfo("America/New_York")
+        ),
+    )
+
+    packet = service.run(profile="tim_grittani", tickers=["HALT"], save_journal=False)
+    row = packet["watchlist"]["blocked_data_quality"][0]
+
+    assert row["ticker"] == "HALT"
+    assert row["halt_status"]["is_active"] is True
+    assert row["data_caveat"].startswith("HALTED")
+    assert packet["data_caveats"] == [f"HALT: {row['data_caveat']}"]
 
 
 def test_morning_brief_buckets_candidates_and_writes_journal(tmp_path) -> None:

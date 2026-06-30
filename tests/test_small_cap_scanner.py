@@ -14,6 +14,7 @@ from app.models import (
     SmallCapCandidate,
     SmallCapEvidence,
     SmallCapScanOutput,
+    HaltStatus,
 )
 from cli.scan_small_caps import _format_evidence_float
 from services.scanner_service import compute_float_rotation
@@ -213,6 +214,7 @@ def _result(
     rel_volume=5.0,
     confidence="OK",
     gap_basis=None,
+    halt_status=None,
 ):
     return ScannerResult(
         ticker=ticker,
@@ -231,6 +233,7 @@ def _result(
         notes=None,
         sources=["fake"],
         timestamp="2026-06-28T12:00:00Z",
+        halt_status=halt_status,
     )
 
 
@@ -448,6 +451,27 @@ def test_conflict_candidate_is_rejected():
 
     assert candidate.grade == "REJECT"
     assert "unusable_confidence" in candidate.matched_signals
+
+
+def test_active_halt_candidate_is_rejected_even_with_clean_price_data():
+    candidate = grade_small_cap_candidate(
+        _result(
+            gap_basis="premarket",
+            halt_status=HaltStatus(
+                ticker="HOT",
+                status="HALTED_REGULATORY",
+                is_active=True,
+                reason_code="T1",
+                halt_time="2026-06-30T13:35:00+00:00",
+                source="fake_halts",
+            ),
+        ),
+        missing_fields=[],
+    )
+
+    assert candidate.grade == "REJECT"
+    assert "active_halt" in candidate.matched_signals
+    assert any("halt" in note.lower() for note in candidate.risk_notes)
 
 
 def test_float_rotation_adjustment_lifts_score_without_bypassing_gap_basis_gate():
