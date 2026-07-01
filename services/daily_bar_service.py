@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -7,8 +8,15 @@ from app.models import IntradayBar, IntradayBarSeries
 
 
 class DailyBarService:
-    def __init__(self) -> None:
+    def __init__(self, now_provider: Callable[[], datetime] | None = None) -> None:
         self.ny_tz = ZoneInfo("America/New_York")
+        self._now_provider = now_provider
+
+    def _now_ny(self) -> datetime:
+        now = self._now_provider() if self._now_provider else datetime.now(self.ny_tz)
+        if now.tzinfo is None:
+            return now.replace(tzinfo=self.ny_tz)
+        return now.astimezone(self.ny_tz)
 
     def _get_completed_bars(self, series: IntradayBarSeries) -> list[IntradayBar]:
         """Returns the list of bars excluding today's incomplete bar."""
@@ -21,7 +29,7 @@ class DailyBarService:
             last_timestamp = bars[-1].timestamp.replace("Z", "+00:00")
             dt = datetime.fromisoformat(last_timestamp)
             ny_date = dt.astimezone(self.ny_tz).date()
-            today_date = datetime.now(self.ny_tz).date()
+            today_date = self._now_ny().date()
 
             if ny_date == today_date:
                 bars.pop()

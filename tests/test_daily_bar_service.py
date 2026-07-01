@@ -1,4 +1,6 @@
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from app.models import IntradayBar, IntradayBarSeries
 from services.daily_bar_service import DailyBarService
 
@@ -121,9 +123,9 @@ def test_prior_day_levels():
 
 def test_excludes_today_bar():
     # If a bar has today's date, it should be excluded from historical calculations
-    svc = DailyBarService()
-    now_ny = datetime.now(svc.ny_tz)
-    today_iso = now_ny.strftime("%Y-%m-%dT%H:%M:%SZ")
+    fixed_now = datetime(2026, 7, 1, 9, 45, tzinfo=ZoneInfo("America/New_York"))
+    svc = DailyBarService(now_provider=lambda: fixed_now)
+    today_iso = fixed_now.astimezone(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z")
     
     dates = [
         "2026-06-25T04:00:00Z",
