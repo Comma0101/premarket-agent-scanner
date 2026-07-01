@@ -74,11 +74,16 @@ def build_trader_context_explanation(context: dict[str, Any]) -> dict[str, Any]:
         "ticker": ticker,
         "trader": trader,
         "lens": _context_lens(trader),
-        "verdict": _context_verdict(snapshot),
+        "verdict": _context_verdict(snapshot, trader=trader),
         "moment_state": moment_state,
         "data_card": _data_card(snapshot),
         "setup_stack": setup_stack,
-        "moment_path": _context_moment_path(snapshot, evidence, technicals),
+        "moment_path": _context_moment_path(
+            snapshot,
+            evidence,
+            technicals,
+            trader=trader,
+        ),
         "what_we_lack": missing_fields,
         "next_needed": _context_next_needed(snapshot, missing_fields),
         "context": context,
@@ -392,7 +397,11 @@ def _context_setup_stack(
     technicals: dict[str, Any],
 ) -> list[dict[str, str]]:
     checks = [
-        _check("Data quality", _data_quality_status(snapshot), _data_quality_detail(snapshot))
+        _check(
+            "Data quality",
+            _context_data_quality_status(snapshot, trader),
+            _context_data_quality_detail(snapshot, trader),
+        )
     ]
     if trader == "timothy_sykes":
         checks.extend(
@@ -521,8 +530,8 @@ def _context_lens(trader: str) -> str:
     }.get(trader, "grounded_trader_context")
 
 
-def _context_verdict(snapshot: dict[str, Any]) -> str:
-    if _data_quality_status(snapshot) == "BLOCKED":
+def _context_verdict(snapshot: dict[str, Any], *, trader: str = "default") -> str:
+    if _context_data_quality_status(snapshot, trader) == "BLOCKED":
         return "Blocked by data quality"
     return "Context ready"
 
@@ -537,8 +546,10 @@ def _context_moment_path(
     snapshot: dict[str, Any],
     evidence: dict[str, Any],
     technicals: dict[str, Any],
+    *,
+    trader: str = "default",
 ) -> list[dict[str, str]]:
-    data_ready = _data_quality_status(snapshot) == "PASS"
+    data_ready = _context_data_quality_status(snapshot, trader) == "PASS"
     evidence_ready = bool(evidence)
     technical_ready = (
         _technical_status(technicals, "intraday") == "PASS"
@@ -548,7 +559,7 @@ def _context_moment_path(
         _moment(
             "Data",
             "ready" if data_ready else "blocked",
-            _data_quality_detail(snapshot),
+            _context_data_quality_detail(snapshot, trader),
         ),
         _moment(
             "Evidence",
@@ -704,6 +715,26 @@ def _data_quality_detail(snapshot: dict[str, Any]) -> str:
         f"gap_basis={snapshot.get('gap_basis') or 'unknown'}, "
         f"confidence={snapshot.get('confidence') or 'unknown'}."
     )
+
+
+def _context_data_quality_status(snapshot: dict[str, Any], trader: str) -> str:
+    if trader == "lance_breitstein":
+        return "BLOCKED" if _lance_data_quality_blocked(snapshot) else "PASS"
+    return _data_quality_status(snapshot)
+
+
+def _context_data_quality_detail(snapshot: dict[str, Any], trader: str) -> str:
+    if (
+        trader == "lance_breitstein"
+        and snapshot.get("confidence") == "OK"
+        and snapshot.get("gap_basis") == "last_trade"
+        and session_mode_for(snapshot.get("timestamp")) == "MARKET_OPEN"
+    ):
+        return (
+            "gap_basis=last_trade, confidence=OK; market-open regular-session "
+            "quote is eligible for Lance intraday review, not premarket-gap grading."
+        )
+    return _data_quality_detail(snapshot)
 
 
 def _candidate_has_catalyst(candidate: dict[str, Any] | None) -> bool:

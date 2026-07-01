@@ -312,10 +312,15 @@ def test_context_explainer_allows_lance_market_open_last_trade_review() -> None:
         }
     )
 
+    assert explanation["verdict"] == "Context ready"
     assert explanation["moment_state"] == "setup_forming"
     assert explanation["lance_state"]["state"] == "setup_forming"
     assert "regular-session quote" in explanation["lance_state"]["data_caveat"]
     assert "Off-session" not in explanation["lance_state"]["data_caveat"]
+    stack = {item["label"]: item for item in explanation["setup_stack"]}
+    assert stack["Data quality"]["status"] == "PASS"
+    assert "regular-session quote" in stack["Data quality"]["detail"]
+    assert explanation["moment_path"][0]["state"] == "ready"
 
 
 def test_context_explainer_marks_lance_triggered_reference_from_intraday_signal() -> None:
