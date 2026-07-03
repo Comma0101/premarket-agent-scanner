@@ -10,6 +10,7 @@ from typing import Any
 import typer
 
 from agent_tools.tools import run_lance_command_center
+from cli.lance_data_used import data_used_lines
 
 
 app = typer.Typer(add_completion=False, help="Run the Lance command center.")
@@ -159,6 +160,7 @@ def _render(payload: dict[str, Any]) -> None:
     typer.echo(f"Active Monitor: {_join(read.get('active_monitor') or [])}")
     typer.echo(f"Swing Watch: {_join(read.get('swing_watch') or [])}")
     typer.echo(f"Blocked/Data Caveat: {_join(read.get('blocked_data_quality') or [])}")
+    _render_data_used(payload)
 
     tracker = payload.get("tracker") if isinstance(payload.get("tracker"), dict) else None
     if tracker:
@@ -257,6 +259,15 @@ def _render(payload: dict[str, Any]) -> None:
     if disclaimer:
         typer.echo("")
         typer.echo(disclaimer)
+
+
+def _render_data_used(payload: dict[str, Any]) -> None:
+    lines = data_used_lines(payload)
+    if not lines:
+        return
+    _section("Data Lance Used")
+    for line in lines:
+        typer.echo(line)
 
 
 def _section(title: str) -> None:

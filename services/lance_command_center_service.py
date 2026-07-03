@@ -82,6 +82,7 @@ class LanceCommandCenterService:
         signal_quality = _signal_quality(full_cycle)
         data_doctor = self.data_doctor_service.from_signal_quality(signal_quality)
         session_ids = _session_ids(full_cycle)
+        data_used = _data_used(full_cycle)
         return {
             "agent_name": "lance_full_cycle",
             "mode": "command_center",
@@ -91,6 +92,7 @@ class LanceCommandCenterService:
             "single_run_read": _single_run_read(full_cycle, signal_quality),
             "tracker": tracker,
             "signal_quality": signal_quality,
+            "data_used": data_used,
             "data_doctor": data_doctor,
             "tomorrow_prep": _tomorrow_prep(full_cycle),
             "outcome_loop": _outcome_loop(full_cycle),
@@ -106,6 +108,7 @@ class LanceCommandCenterService:
                 single_run_read=_single_run_read(full_cycle, signal_quality),
                 session_ids=session_ids,
                 data_doctor=data_doctor,
+                data_used=data_used,
                 outcome_loop=_outcome_loop(full_cycle),
                 workflow_commands=_workflow_commands(
                     tickers=tickers,
@@ -130,6 +133,7 @@ def _agent_handoff(
     single_run_read: dict[str, Any],
     session_ids: dict[str, Any],
     data_doctor: dict[str, Any],
+    data_used: dict[str, Any],
     outcome_loop: dict[str, Any],
     workflow_commands: dict[str, str],
 ) -> dict[str, Any]:
@@ -141,6 +145,7 @@ def _agent_handoff(
         "swing_watch": list(single_run_read.get("swing_watch") or []),
         "blocked_data_quality": list(single_run_read.get("blocked_data_quality") or []),
         "data_doctor": doctor_read.get("one_liner"),
+        "data_used": data_used,
         "pending_review_tickers": list(outcome_loop.get("pending_review_tickers") or []),
         "next_commands": workflow_commands,
         "handoff_prompt": (
@@ -148,6 +153,77 @@ def _agent_handoff(
             "do not infer missing market numbers, and keep outcomes unknown until manual review."
         ),
     }
+
+
+BENCHMARK_ORDER = ["SPY", "QQQ", "IWM", "SMH", "XLK"]
+
+
+def _data_used(full_cycle: dict[str, Any]) -> dict[str, Any]:
+    benchmarks = _benchmark_rows(full_cycle)
+    candidate_rows = _candidate_rows(full_cycle)
+    source_paths = []
+    if benchmarks:
+        source_paths.append("full_cycle.market_context.benchmarks")
+    if candidate_rows:
+        source_paths.append("full_cycle.combined_watchlist")
+    return {
+        "summary": f"{_phrase(len(candidate_rows), 'candidate row')}, {_phrase(len(benchmarks), 'benchmark row')}.",
+        "source_paths": source_paths,
+        "benchmarks": benchmarks,
+        "candidate_rows": candidate_rows,
+    }
+
+
+def _benchmark_rows(full_cycle: dict[str, Any]) -> list[dict[str, Any]]:
+    context = full_cycle.get("market_context") if isinstance(full_cycle.get("market_context"), dict) else {}
+    benchmarks = context.get("benchmarks") if isinstance(context.get("benchmarks"), dict) else {}
+    symbols = [symbol for symbol in BENCHMARK_ORDER if symbol in benchmarks]
+    known_symbols = set(BENCHMARK_ORDER)
+    symbols.extend(sorted(symbol for symbol in benchmarks if symbol not in known_symbols))
+    rows = []
+    for symbol in symbols:
+        data = benchmarks.get(symbol)
+        if not isinstance(data, dict):
+            continue
+        rows.append({
+            "ticker": symbol,
+            "gap_pct": data.get("gap_pct"),
+            "gap_basis": data.get("gap_basis"),
+            "confidence": data.get("confidence"),
+            "as_of": data.get("as_of") or data.get("as_of_et"),
+            "sources": list(data.get("sources") or []),
+        })
+    return rows
+
+
+def _candidate_rows(full_cycle: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for row in full_cycle.get("combined_watchlist") or []:
+        if not isinstance(row, dict):
+            continue
+        ticker = str(row.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        quality = row.get("data_quality") if isinstance(row.get("data_quality"), dict) else {}
+        rows.append({
+            "ticker": ticker,
+            "intraday_state": row.get("intraday_state"),
+            "swing_state": row.get("swing_state"),
+            "intraday_playbook": row.get("intraday_playbook"),
+            "swing_playbook": row.get("swing_playbook"),
+            "latest_price": quality.get("latest_price"),
+            "gap_pct": quality.get("gap_pct"),
+            "gap_basis": quality.get("gap_basis"),
+            "confidence": quality.get("confidence"),
+            "data_status": quality.get("data_status"),
+            "rel_volume": quality.get("rel_volume"),
+            "volume": quality.get("volume"),
+            "as_of": quality.get("as_of"),
+            "as_of_et": quality.get("as_of_et"),
+            "sources": list(quality.get("sources") or []),
+            "data_caveat": quality.get("data_caveat"),
+        })
+    return rows
 
 
 def _single_run_read(

@@ -37,6 +37,17 @@ class FakeFullCycleService:
                 "swing_plan_count": 3,
                 "combined_ticker_count": 3,
             },
+            "market_context": {
+                "benchmarks": {
+                    "SPY": {
+                        "gap_pct": 0.42,
+                        "gap_basis": "premarket",
+                        "confidence": "OK",
+                        "as_of": "2026-07-03T13:30:00Z",
+                        "sources": ["alpaca"],
+                    }
+                }
+            },
             "combined_watchlist": [
                 _combined_row(
                     "IBM",
@@ -47,6 +58,9 @@ class FakeFullCycleService:
                     as_of_et="Jul 3 9:45 AM ET",
                     data_status="live",
                     rel_volume=4.2,
+                    latest_price=189.25,
+                    gap_pct=1.25,
+                    sources=["alpaca", "yfinance"],
                 ),
                 _combined_row(
                     "MU",
@@ -57,6 +71,9 @@ class FakeFullCycleService:
                     as_of_et="Jul 3 9:45 AM ET",
                     data_status="live",
                     rel_volume=2.5,
+                    latest_price=118.40,
+                    gap_pct=-0.85,
+                    sources=["alpaca"],
                 ),
                 _combined_row(
                     "AAOI",
@@ -67,6 +84,9 @@ class FakeFullCycleService:
                     as_of_et="Jul 2 4:00 PM ET",
                     data_status="stale",
                     rel_volume=None,
+                    latest_price=None,
+                    gap_pct=None,
+                    sources=[],
                 ),
             ],
             "pending_reviews": [
@@ -125,6 +145,9 @@ def _combined_row(
     as_of_et: str,
     data_status: str,
     rel_volume: float | None,
+    latest_price: float | None,
+    gap_pct: float | None,
+    sources: list[str],
 ) -> dict:
     return {
         "ticker": ticker,
@@ -137,6 +160,9 @@ def _combined_row(
             "as_of_et": as_of_et,
             "data_status": data_status,
             "rel_volume": rel_volume,
+            "latest_price": latest_price,
+            "gap_pct": gap_pct,
+            "sources": sources,
         },
     }
 
@@ -190,6 +216,40 @@ def test_lance_command_center_runs_full_cycle_and_builds_single_read():
     assert output["workflow_commands"]["now"].startswith(".venv/bin/python -m cli.lance")
     assert output["workflow_commands"]["watch"].startswith(".venv/bin/python -m cli.lance_full_cycle")
     assert output["workflow_commands"]["tomorrow"].startswith(".venv/bin/python -m cli.lance_dashboard tomorrow")
+    assert output["data_used"]["summary"] == "3 candidate rows, 1 benchmark row."
+    assert output["data_used"]["source_paths"] == [
+        "full_cycle.market_context.benchmarks",
+        "full_cycle.combined_watchlist",
+    ]
+    assert output["data_used"]["benchmarks"] == [
+        {
+            "ticker": "SPY",
+            "gap_pct": 0.42,
+            "gap_basis": "premarket",
+            "confidence": "OK",
+            "as_of": "2026-07-03T13:30:00Z",
+            "sources": ["alpaca"],
+        }
+    ]
+    ibm_data = output["data_used"]["candidate_rows"][0]
+    assert ibm_data == {
+        "ticker": "IBM",
+        "intraday_state": "triggered_reference",
+        "swing_state": None,
+        "intraday_playbook": None,
+        "swing_playbook": None,
+        "latest_price": 189.25,
+        "gap_pct": 1.25,
+        "gap_basis": "premarket",
+        "confidence": "OK",
+        "data_status": "live",
+        "rel_volume": 4.2,
+        "volume": None,
+        "as_of": None,
+        "as_of_et": "Jul 3 9:45 AM ET",
+        "sources": ["alpaca", "yfinance"],
+        "data_caveat": None,
+    }
     assert output["agent_handoff"] == {
         "summary": "1 active monitor, 1 swing watch, 1 blocked/data-caveat, 1 pending review.",
         "session_ids": {
@@ -200,6 +260,7 @@ def test_lance_command_center_runs_full_cycle_and_builds_single_read():
         "swing_watch": ["MU"],
         "blocked_data_quality": ["AAOI"],
         "data_doctor": "2 ready, 1 blocked. Main blockers: stale_or_off_session=1.",
+        "data_used": output["data_used"],
         "pending_review_tickers": ["IBM"],
         "next_commands": output["workflow_commands"],
         "handoff_prompt": (

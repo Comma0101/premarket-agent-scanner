@@ -85,6 +85,61 @@ def _payload() -> dict:
             "watch": ".venv/bin/python -m cli.lance_full_cycle --tickers IBM,MU --watch 30",
             "tomorrow": ".venv/bin/python -m cli.lance_dashboard tomorrow --intraday-session-id 2026-07-03-lance-intraday --swing-session-id 2026-07-03-lance-swing",
         },
+        "data_used": {
+            "summary": "2 candidate rows, 1 benchmark row.",
+            "source_paths": [
+                "full_cycle.market_context.benchmarks",
+                "full_cycle.combined_watchlist",
+            ],
+            "benchmarks": [
+                {
+                    "ticker": "SPY",
+                    "gap_pct": 0.42,
+                    "gap_basis": "premarket",
+                    "confidence": "OK",
+                    "as_of": "2026-07-03T13:30:00Z",
+                    "sources": ["alpaca"],
+                }
+            ],
+            "candidate_rows": [
+                {
+                    "ticker": "IBM",
+                    "intraday_state": "triggered_reference",
+                    "swing_state": None,
+                    "intraday_playbook": "mean_reversion_after_capitulation",
+                    "swing_playbook": None,
+                    "latest_price": 189.25,
+                    "gap_pct": 1.25,
+                    "gap_basis": "premarket",
+                    "confidence": "OK",
+                    "data_status": "live",
+                    "rel_volume": 4.2,
+                    "volume": 1250000,
+                    "as_of": None,
+                    "as_of_et": "Jul 3 9:45 AM ET",
+                    "sources": ["alpaca", "yfinance"],
+                    "data_caveat": None,
+                },
+                {
+                    "ticker": "AAOI",
+                    "intraday_state": "blocked_data_quality",
+                    "swing_state": None,
+                    "intraday_playbook": None,
+                    "swing_playbook": None,
+                    "latest_price": None,
+                    "gap_pct": None,
+                    "gap_basis": "last_trade",
+                    "confidence": "STALE_DATA",
+                    "data_status": "stale",
+                    "rel_volume": None,
+                    "volume": None,
+                    "as_of": None,
+                    "as_of_et": "Jul 2 4:00 PM ET",
+                    "sources": [],
+                    "data_caveat": "POST_MARKET: last_trade / STALE_DATA",
+                },
+            ],
+        },
         "agent_handoff": {
             "summary": "1 active monitor, 1 swing watch, 1 blocked/data-caveat, 1 pending review.",
             "session_ids": {
@@ -95,6 +150,12 @@ def _payload() -> dict:
             "swing_watch": ["MU"],
             "blocked_data_quality": ["AAOI"],
             "data_doctor": "1 ready, 1 blocked. Main blockers: stale_or_off_session=1.",
+            "data_used": {
+                "summary": "2 candidate rows, 1 benchmark row.",
+                "candidate_rows": [],
+                "benchmarks": [],
+                "source_paths": [],
+            },
             "pending_review_tickers": ["IBM"],
             "next_commands": {
                 "now": ".venv/bin/python -m cli.lance --tickers IBM,MU",
@@ -128,6 +189,13 @@ def test_lance_cli_prints_command_center(monkeypatch):
     assert "Active Monitor: IBM" in result.stdout
     assert "Swing Watch: MU" in result.stdout
     assert "Blocked/Data Caveat: AAOI" in result.stdout
+    assert "Data Lance Used" in result.stdout
+    assert "SPY: gap=0.42% basis=premarket confidence=OK" in result.stdout
+    assert "IBM | intraday=triggered_reference | swing=unknown" in result.stdout
+    assert "price=189.25 | gap=1.25% | rvol=4.20x" in result.stdout
+    assert "sources=alpaca,yfinance" in result.stdout
+    assert "AAOI | intraday=blocked_data_quality | swing=unknown" in result.stdout
+    assert "status=stale" in result.stdout
     assert "Signal Quality" in result.stdout
     assert "IBM posture=active_monitor" in result.stdout
     assert "AAOI posture=blocked_data_quality" in result.stdout

@@ -10,12 +10,10 @@ from typing import Any
 import typer
 
 from agent_tools.tools import run_lance_command_center
+from cli.lance_data_used import data_used_lines
 
 
 app = typer.Typer(add_completion=False, help="Run Lance as a live operator console.")
-
-DATA_USED_ROW_LIMIT = 6
-BENCHMARK_ORDER = ["SPY", "QQQ", "IWM", "SMH", "XLK"]
 
 
 @app.command()
@@ -194,7 +192,7 @@ def _render_buckets(payload: dict[str, Any]) -> None:
 
 
 def _render_data_used(payload: dict[str, Any]) -> None:
-    lines = _data_used_lines(payload)
+    lines = data_used_lines(payload)
     if not lines:
         return
     _section("Data Lance Used")
@@ -301,7 +299,7 @@ def _handoff_markdown(payload: dict[str, Any]) -> str:
         "",
         "## Data Lance Used",
     ]
-    data_used = _data_used_lines(payload)
+    data_used = data_used_lines(payload)
     lines.extend(data_used or ["none"])
     lines.extend(
         [
@@ -335,97 +333,6 @@ def _handoff_markdown(payload: dict[str, Any]) -> str:
     if disclaimer:
         lines.extend(["", disclaimer])
     return "\n".join(lines) + "\n"
-
-
-def _data_used_lines(payload: dict[str, Any]) -> list[str]:
-    lines: list[str] = []
-    benchmark_lines = _benchmark_lines(payload)
-    if benchmark_lines:
-        lines.extend(benchmark_lines)
-    rows = _candidate_evidence_rows(payload)
-    if rows:
-        for row in rows[:DATA_USED_ROW_LIMIT]:
-            lines.append(_format_candidate_evidence(row))
-        remaining = len(rows) - DATA_USED_ROW_LIMIT
-        if remaining > 0:
-            lines.append(f"... {remaining} more row(s) in latest_command_center.json")
-    return lines
-
-
-def _benchmark_lines(payload: dict[str, Any]) -> list[str]:
-    full_cycle = payload.get("full_cycle") if isinstance(payload.get("full_cycle"), dict) else {}
-    context = full_cycle.get("market_context") if isinstance(full_cycle.get("market_context"), dict) else {}
-    benchmarks = context.get("benchmarks") if isinstance(context.get("benchmarks"), dict) else {}
-    symbols = [symbol for symbol in BENCHMARK_ORDER if symbol in benchmarks]
-    known_symbols = set(BENCHMARK_ORDER)
-    symbols.extend(sorted(symbol for symbol in benchmarks if symbol not in known_symbols))
-    return [_format_benchmark(symbol, benchmarks[symbol]) for symbol in symbols[:5] if isinstance(benchmarks[symbol], dict)]
-
-
-def _candidate_evidence_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    full_cycle = payload.get("full_cycle") if isinstance(payload.get("full_cycle"), dict) else {}
-    for key in ["combined_watchlist", "top_intraday_watchlist", "top_swing_watchlist", "top_updates"]:
-        rows = full_cycle.get(key)
-        if isinstance(rows, list) and rows:
-            return [row for row in rows if isinstance(row, dict)]
-    return []
-
-
-def _format_benchmark(symbol: str, data: dict[str, Any]) -> str:
-    sources = _format_sources(data.get("sources"))
-    return (
-        f"{symbol}: gap={_format_pct(data.get('gap_pct'))} "
-        f"basis={_value(data.get('gap_basis'))} "
-        f"confidence={_value(data.get('confidence'))} "
-        f"as_of={_value(data.get('as_of') or data.get('as_of_et'))} "
-        f"sources={sources}"
-    )
-
-
-def _format_candidate_evidence(row: dict[str, Any]) -> str:
-    data_quality = row.get("data_quality") if isinstance(row.get("data_quality"), dict) else {}
-    parts = [
-        _value(row.get("ticker")),
-        f"intraday={_value(row.get('intraday_state') or row.get('state'))}",
-        f"swing={_value(row.get('swing_state'))}",
-        f"playbook={_value(row.get('intraday_playbook') or row.get('playbook') or row.get('swing_playbook'))}",
-        f"price={_format_price(data_quality.get('latest_price'))}",
-        f"gap={_format_pct(data_quality.get('gap_pct'))}",
-        f"rvol={_format_multiple(data_quality.get('rel_volume'))}",
-        f"basis={_value(data_quality.get('gap_basis'))}",
-        f"confidence={_value(data_quality.get('confidence'))}",
-        f"status={_value(data_quality.get('data_status'))}",
-        f"as_of={_value(data_quality.get('as_of_et') or data_quality.get('as_of'))}",
-        f"sources={_format_sources(data_quality.get('sources'))}",
-    ]
-    caveat = data_quality.get("data_caveat")
-    if caveat:
-        parts.append(f"caveat={_value(caveat)}")
-    return " | ".join(parts)
-
-
-def _format_pct(value: Any) -> str:
-    if not isinstance(value, int | float):
-        return "unknown"
-    return f"{float(value):.2f}%"
-
-
-def _format_price(value: Any) -> str:
-    if not isinstance(value, int | float):
-        return "unknown"
-    return f"{float(value):.2f}"
-
-
-def _format_multiple(value: Any) -> str:
-    if not isinstance(value, int | float):
-        return "unknown"
-    return f"{float(value):.2f}x"
-
-
-def _format_sources(value: Any) -> str:
-    if not isinstance(value, list) or not value:
-        return "none"
-    return ",".join(_value(source) for source in value)
 
 
 def _load_previous(path: Path | None) -> dict[str, Any] | None:
