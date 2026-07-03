@@ -36,6 +36,14 @@ def main(
         "--max-workers",
         help="Bounded worker count for broad market scans.",
     ),
+    include_rejected: bool = typer.Option(
+        False,
+        "--include-rejected",
+        help=(
+            "Show rejected candidates (score=0, grade=REJECT) so the desk can "
+            "see why nothing qualified. Off by default."
+        ),
+    ),
     all_universes: bool = typer.Option(False, "--all", help="Scan every defined universe."),
 ) -> None:
     if not any([universe, watchlist, tickers, market, all_universes]):
@@ -53,18 +61,19 @@ def main(
             market_limit=market_limit,
             max_workers=max_workers,
             all_universes=all_universes,
+            include_rejected=include_rejected,
         )
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    _render(output)
+    _render(output, include_rejected=include_rejected)
 
 
-def _render(output) -> None:
+def _render(output, *, include_rejected: bool = False) -> None:
     try:
         from rich.console import Console
         from rich.table import Table
     except ImportError:
-        _render_plain(output)
+        _render_plain(output, include_rejected=include_rejected)
         return
 
     console = Console()
@@ -94,11 +103,51 @@ def _render(output) -> None:
 
     console.print(table)
     console.print(f"[dim]{output.candidate_count} candidate(s).[/dim]")
+    _render_empty_state(console, output)
+    if include_rejected:
+        _render_rejected(console, output)
     for note in output.notes:
         console.print(f"[dim]note: {note}[/dim]")
 
 
-def _render_plain(output) -> None:
+def _render_rejected(console, output) -> None:
+    from rich.table import Table
+
+    rejected = list(getattr(output, "rejected", []) or [])
+    if not rejected:
+        return
+    rejected_table = Table(
+        title=f"Rejected candidates ({len(rejected)})",
+        header_style="bold yellow",
+    )
+    rejected_table.add_column("Ticker", style="bold yellow")
+    rejected_table.add_column("Score", justify="right")
+    rejected_table.add_column("Gap", justify="right")
+    rejected_table.add_column("Reason", overflow="ellipsis", max_width=80)
+
+    for item in rejected:
+        reason = _first_risk_note(item.risk_notes) or "-"
+        rejected_table.add_row(
+            item.ticker,
+            str(item.score),
+            format_gap(item.gap_pct),
+            reason,
+        )
+    console.print(rejected_table)
+
+
+def _render_empty_state(console, output) -> None:
+    reason = getattr(output, "zero_result_reason", None)
+    suggestions = list(getattr(output, "relax_suggestions", []) or [])
+    if not reason and output.candidate_count > 0:
+        return
+    if reason:
+        console.print(f"[yellow]zero_result_reason: {reason}[/yellow]")
+    for suggestion in suggestions:
+        console.print(f"[yellow]suggestion: {suggestion}[/yellow]")
+
+
+def _render_plain(output, *, include_rejected: bool = False) -> None:
     print(f"Small-cap scan [{output.preset}]")
     if not output.candidates:
         print("No candidates.")
@@ -119,8 +168,30 @@ def _render_plain(output) -> None:
             f"missing={_format_candidate_missing_fields(item)}"
         )
     print(f"{output.candidate_count} candidate(s).")
+    reason = getattr(output, "zero_result_reason", None)
+    if reason:
+        print(f"zero_result_reason: {reason}")
+    for suggestion in getattr(output, "relax_suggestions", []) or []:
+        print(f"suggestion: {suggestion}")
+    if include_rejected:
+        rejected = list(getattr(output, "rejected", []) or [])
+        if rejected:
+            print(f"\nRejected candidates ({len(rejected)}):")
+            for item in rejected:
+                reason = _first_risk_note(item.risk_notes) or "-"
+                print(
+                    f"  {item.ticker:<6} score={item.score:>3} "
+                    f"gap={format_gap(item.gap_pct):>8} reason={reason}"
+                )
     for note in output.notes:
         print(f"note: {note}")
+
+
+def _first_risk_note(notes: list[str]) -> str | None:
+    for note in notes:
+        if note:
+            return note
+    return None
 
 
 def _format_missing_fields(missing_fields: list[str]) -> str:

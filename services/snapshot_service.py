@@ -13,7 +13,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from app.models import CombinedSnapshot, ProviderPriceData, utc_now_iso
+from app.models import CombinedSnapshot, HaltStatus, ProviderPriceData, utc_now_iso
 from providers.yfinance_provider import YFinanceProvider
 
 # If yfinance and Alpaca disagree on price by more than this fraction, the
@@ -29,10 +29,12 @@ class SnapshotService:
         self,
         yf_provider: YFinanceProvider | None = None,
         alpaca_provider: Any | None = None,
+        halt_provider: Any | None = None,
     ) -> None:
         self.yf_provider = yf_provider or YFinanceProvider()
         # Alpaca is optional; passing None keeps the scanner yfinance-only.
         self.alpaca_provider = alpaca_provider
+        self.halt_provider = halt_provider
 
     @classmethod
     def with_configured_providers(cls, db_path: str | None = None) -> "SnapshotService":
@@ -42,11 +44,13 @@ class SnapshotService:
         service, so behavior is unchanged until an API key is provided.
         """
         from providers.alpaca_provider import AlpacaProvider
+        from providers.nasdaq_halt_provider import NasdaqHaltProvider
 
         alpaca = AlpacaProvider(db_path=db_path)
         return cls(
             yf_provider=YFinanceProvider(),
             alpaca_provider=alpaca if alpaca.is_configured else None,
+            halt_provider=NasdaqHaltProvider(),
         )
 
     def build_snapshot(self, ticker: str) -> CombinedSnapshot:
@@ -65,16 +69,32 @@ class SnapshotService:
                     error=str(exc),
                 )
 
-        return self._combine(normalized, yf_data, alpaca_data)
+        halt_status = self._get_halt_status(normalized)
+        return self._combine(normalized, yf_data, alpaca_data, halt_status)
+
+    def _get_halt_status(self, ticker: str) -> HaltStatus | None:
+        if self.halt_provider is None:
+            return None
+        try:
+            return self.halt_provider.get_halt_status(ticker)
+        except Exception as exc:
+            return HaltStatus(
+                ticker=ticker,
+                status="UNKNOWN",
+                error=str(exc),
+                notes=["NASDAQ halt feed lookup raised an exception."],
+            )
 
     def _combine(
         self,
         ticker: str,
         yf_data: ProviderPriceData,
         alpaca_data: ProviderPriceData | None,
+        halt_status: HaltStatus | None = None,
     ) -> CombinedSnapshot:
         sources: list[str] = []
         notes: list[str] = []
+        provider_failures: dict[str, str] = {}
 
         # yfinance is primary for previous close, premarket, and last price.
         previous_close = yf_data.previous_close
@@ -90,6 +110,8 @@ class SnapshotService:
 
         if yf_data.error:
             notes.append(f"yfinance: {yf_data.error}")
+            if yf_data.error != "missing_credentials":
+                provider_failures[yf_data.source] = yf_data.error
         else:
             sources.append(yf_data.source)
         notes.extend(yf_data.notes)
@@ -106,6 +128,7 @@ class SnapshotService:
             timestamp = timestamp or alpaca_data.timestamp
         elif alpaca_data is not None and alpaca_data.error not in {None, "missing_credentials"}:
             notes.append(f"alpaca: {alpaca_data.error}")
+            provider_failures[alpaca_data.source] = alpaca_data.error
 
         confidence = self._assign_confidence(
             previous_close=previous_close,
@@ -130,6 +153,13 @@ class SnapshotService:
             source_primary=sources[0] if sources else None,
             source_secondary=sources[1] if len(sources) > 1 else None,
             confidence=confidence,
+            data_status=_assign_data_status(
+                confidence=confidence,
+                sources=sources,
+                provider_failures=provider_failures,
+            ),
+            provider_failures=provider_failures,
+            halt_status=halt_status,
             sources=sources,
             notes=notes,
             raw_yfinance_json=json.dumps(yf_data.raw) if yf_data.raw else None,
@@ -220,3 +250,20 @@ def _num(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number
+
+
+def _assign_data_status(
+    *,
+    confidence: str,
+    sources: list[str],
+    provider_failures: dict[str, str],
+) -> str:
+    if provider_failures:
+        return "provider_failure"
+    if not sources:
+        return "no_providers"
+    if confidence == "STALE_DATA":
+        return "stale"
+    if confidence == "OK":
+        return "live"
+    return "partial"

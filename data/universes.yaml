@@ -53,3 +53,62 @@ ETF_BENCHMARKS:
   - SOXX
   - SMH
   - XLK
+AI_SEMIS_MEMORY:
+  - NVDA
+  - AMD
+  - AVGO
+  - MRVL
+  - ARM
+  - MU
+  - SNDK
+  - TSM
+  - ASML
+  - AMAT
+  - LRCX
+  - KLAC
+  - TER
+  - AMKR
+  - ALAB
+  - QCOM
+  - INTC
+  - AAOI
+  - COHR
+AI_INFRA_POWER:
+  - SMCI
+  - DELL
+  - CRWV
+  - CEG
+  - GEV
+  - VRT
+  - ETN
+  - OKLO
+  - BE
+  - FSLR
+  - ENPH
+SPECULATIVE_ACTIVE:
+  - PLTR
+  - COIN
+  - MSTR
+  - CRCL
+  - BLSH
+  - FIGR
+  - SOFI
+  - AFRM
+  - UPST
+  - RDDT
+  - CVNA
+  - GME
+  - DJT
+  - MARA
+  - OPEN
+THEME_ETFS_MACRO:
+  - SPY
+  - QQQ
+  - TQQQ
+  - SMH
+  - DRAM
+  - GLD
+  - SLV
+  - VIX
+  - YANG
+  - BULL

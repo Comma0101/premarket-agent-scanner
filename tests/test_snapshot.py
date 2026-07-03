@@ -7,7 +7,7 @@ as it would be with live providers.
 
 from __future__ import annotations
 
-from app.models import ProviderPriceData, utc_now_iso
+from app.models import HaltStatus, ProviderPriceData, utc_now_iso
 from services.snapshot_service import SnapshotService
 
 
@@ -82,6 +82,47 @@ def test_missing_alpaca_credentials_falls_back_to_yfinance_only():
     assert snap.source_secondary is None
 
 
+def test_snapshot_provider_failures_are_structured_and_not_counted_as_sources():
+    yf = ProviderPriceData(
+        ticker="NVDA",
+        source="yfinance",
+        notes=["Failed to fetch yfinance quote: DNS failure"],
+        error="DNS failure",
+    )
+    alpaca = ProviderPriceData(
+        ticker="NVDA",
+        source="alpaca",
+        notes=["Alpaca latest trade unavailable: DNS failure"],
+        error="no_usable_alpaca_snapshot",
+    )
+
+    snap = _service(yf, alpaca).build_snapshot("NVDA")
+
+    assert snap.confidence == "ERROR"
+    assert snap.data_status == "provider_failure"
+    assert snap.provider_failures == {
+        "yfinance": "DNS failure",
+        "alpaca": "no_usable_alpaca_snapshot",
+    }
+    assert snap.sources == []
+
+
+def test_snapshot_data_status_partial_when_single_source_missing_previous_close():
+    yf = ProviderPriceData(
+        ticker="NVDA",
+        source="yfinance",
+        previous_close=None,
+        latest_price=105.0,
+        timestamp=utc_now_iso(),
+    )
+
+    snap = SnapshotService(yf_provider=FakeProvider("yfinance", yf)).build_snapshot("NVDA")
+
+    assert snap.confidence == "MISSING_PREVIOUS_CLOSE"
+    assert snap.data_status == "partial"
+    assert snap.provider_failures == {}
+
+
 def test_with_configured_providers_is_yfinance_only_without_keys(monkeypatch):
     # No Alpaca keys available -> alpaca provider not attached. Use empty strings
     # rather than delenv so python-dotenv (override=False) cannot reload them
@@ -90,3 +131,27 @@ def test_with_configured_providers_is_yfinance_only_without_keys(monkeypatch):
     monkeypatch.setenv("ALPACA_SECRET_KEY", "")
     service = SnapshotService.with_configured_providers()
     assert service.alpaca_provider is None
+
+
+def test_snapshot_carries_halt_status_without_changing_price_confidence():
+    class FakeHaltProvider:
+        def get_halt_status(self, ticker):
+            return HaltStatus(
+                ticker=ticker,
+                status="HALTED",
+                reason_code="LUDP",
+                halt_time="07/01/2026 09:35:12",
+                source="nasdaq_trader_halts",
+            )
+
+    service = SnapshotService(
+        yf_provider=FakeProvider("yfinance", _yf(100.0, 105.0)),
+        halt_provider=FakeHaltProvider(),
+    )
+
+    snap = service.build_snapshot("NVDA")
+
+    assert snap.confidence == "OK"
+    assert snap.halt_status is not None
+    assert snap.halt_status.status == "HALTED"
+    assert snap.halt_status.reason_code == "LUDP"

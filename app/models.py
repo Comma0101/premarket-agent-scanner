@@ -15,6 +15,8 @@ Confidence = Literal[
     "STALE_DATA",
     "ERROR",
 ]
+DataStatus = Literal["live", "partial", "stale", "provider_failure", "no_providers"]
+HaltState = Literal["HALTED", "RESUMED", "NOT_HALTED", "UNKNOWN"]
 
 Direction = Literal["up", "down", "both"]
 SmallCapGrade = Literal["A_WATCH", "B_WATCH", "C_WATCH", "REJECT"]
@@ -76,6 +78,20 @@ class ProviderPriceData:
 
 
 @dataclass
+class HaltStatus:
+    ticker: str
+    status: HaltState
+    reason_code: str | None = None
+    reason: str | None = None
+    halt_time: str | None = None
+    resume_time: str | None = None
+    source: str = "nasdaq_trader_halts"
+    raw: dict[str, Any] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+    error: str | None = None
+
+
+@dataclass
 class CombinedSnapshot:
     ticker: str
     timestamp: str | None
@@ -89,6 +105,9 @@ class CombinedSnapshot:
     source_primary: str | None
     source_secondary: str | None
     confidence: Confidence
+    data_status: DataStatus = "live"
+    provider_failures: dict[str, str] = field(default_factory=dict)
+    halt_status: HaltStatus | None = None
     sources: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     market_cap: float | None = None
@@ -278,6 +297,15 @@ class SmallCapScanOutput:
     candidate_count: int
     candidates: list[SmallCapCandidate]
     notes: list[str] = field(default_factory=list)
+    # Optional rejected rows, only populated when the caller opts in via
+    # `include_rejected=True`. Hidden by default so existing callers keep the
+    # same surface and the agent layer does not need to filter before display.
+    rejected: list[SmallCapCandidate] = field(default_factory=list)
+    rejected_count: int = 0
+    # Structured empty-state hint surfaced when candidate_count == 0. None when
+    # there is nothing to explain. Always paired with `relax_suggestions`.
+    zero_result_reason: str | None = None
+    relax_suggestions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -289,6 +317,73 @@ class ScanRunOutput:
     status: str
     results: list[ScannerResult]
     notes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class IntradayBar:
+    ticker: str
+    timestamp: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    timeframe: str = "2Min"
+
+
+@dataclass
+class IntradayBarSeries:
+    ticker: str
+    timeframe: str
+    bars: list[IntradayBar]
+    source: str
+    fetched_at: str
+
+
+@dataclass
+class BreitsteinEntrySignal:
+    ticker: str
+    direction: str
+    entry_price: float | None
+    stop_price: float | None
+    target_price: float | None
+    prior_bar_high: float | None
+    prior_bar_low: float | None
+    vwap: float | None
+    vwap_filter_passed: bool | None
+    volume_2x_confirmed: bool | None
+    consecutive_bars: int | None
+    rate_of_change: float | None
+    bollinger_width: float | None
+    timestamp: str
+    confidence: str
+    missing_fields: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FirstRedDaySignal:
+    ticker: str
+    consecutive_green_days: int
+    entry_price: float | None
+    stop_price: float | None
+    vwap: float | None
+    prior_day_close: float | None
+    vwap_filter_passed: bool
+    timestamp: str
+    confidence: str
+    missing_fields: list[str] = field(default_factory=list)
+
+
+@dataclass
+class GrittaniPanicSignal:
+    ticker: str
+    multi_day_run_pct: float
+    intraday_drop_pct: float
+    entry_price: float | None
+    stop_price: float | None
+    timestamp: str
+    confidence: str
+    missing_fields: list[str] = field(default_factory=list)
 
 
 class PriceProvider(Protocol):
@@ -303,3 +398,11 @@ class ProfileProvider(Protocol):
 
     def get_profile(self, ticker: str) -> AssetProfile | None:
         ...
+
+
+class BarProvider(Protocol):
+    source_name: str
+
+    def get_bars(
+        self, ticker: str, timeframe: str, start: str, end: str, limit: int = 100
+    ) -> IntradayBarSeries: ...

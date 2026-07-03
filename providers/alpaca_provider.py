@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 from app.config import get_config
 from app.models import ProviderPriceData
 from providers.yfinance_provider import _num
+
+if TYPE_CHECKING:
+    from app.models import IntradayBarSeries
 
 
 class AlpacaProvider:
@@ -84,6 +87,17 @@ class AlpacaProvider:
 
         if latest_trade_price is None and latest_price is None:
             notes.append("Alpaca has no recent IEX print for this ticker.")
+        error = None
+        if (
+            previous_close is None
+            and latest_trade_price is None
+            and latest_price is None
+            and open_price is None
+            and high is None
+            and low is None
+            and volume is None
+        ):
+            error = "no_usable_alpaca_snapshot"
 
         return ProviderPriceData(
             ticker=normalized,
@@ -98,6 +112,7 @@ class AlpacaProvider:
             timestamp=timestamp,
             raw=raw,
             notes=notes,
+            error=error,
         )
 
     def get_previous_close(self, ticker: str) -> tuple[float | None, dict[str, Any]]:
@@ -134,6 +149,72 @@ class AlpacaProvider:
             if timestamp.astimezone(ZoneInfo("America/New_York")).date() < today_et:
                 return close, payload
         return fallback, payload
+
+    def get_bars(
+        self,
+        ticker: str,
+        timeframe: str = "2Min",
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 100,
+    ) -> "IntradayBarSeries":
+        from app.models import IntradayBar, IntradayBarSeries, utc_now_iso
+
+        if not self.is_configured:
+            return IntradayBarSeries(
+                ticker=ticker.upper(),
+                timeframe=timeframe,
+                bars=[],
+                source=self.source_name,
+                fetched_at=utc_now_iso(),
+            )
+
+        now = datetime.now(timezone.utc)
+        if not start:
+            if timeframe == "1Day":
+                start_dt = now - timedelta(days=30)
+            else:
+                start_dt = now - timedelta(hours=4)
+            start = start_dt.isoformat()
+        if not end:
+            end = now.isoformat()
+
+        payload = self._request(
+            f"/stocks/{ticker.upper()}/bars",
+            {
+                "timeframe": timeframe,
+                "start": start,
+                "end": end,
+                "limit": limit,
+                "adjustment": "raw",
+                "feed": "iex",
+                "sort": "asc",
+            },
+        )
+
+        raw_bars = payload.get("bars", []) if isinstance(payload, dict) else []
+        bars = []
+        for bar in raw_bars:
+            if not isinstance(bar, dict):
+                continue
+            bars.append(IntradayBar(
+                ticker=ticker.upper(),
+                timestamp=_normalize_timestamp(bar.get("t")),
+                open=_num(bar.get("o")) or 0.0,
+                high=_num(bar.get("h")) or 0.0,
+                low=_num(bar.get("l")) or 0.0,
+                close=_num(bar.get("c")) or 0.0,
+                volume=_num(bar.get("v")) or 0.0,
+                timeframe=timeframe,
+            ))
+
+        return IntradayBarSeries(
+            ticker=ticker.upper(),
+            timeframe=timeframe,
+            bars=bars,
+            source=self.source_name,
+            fetched_at=utc_now_iso(),
+        )
 
     def _request(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
         try:

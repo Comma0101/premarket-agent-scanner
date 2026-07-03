@@ -29,6 +29,14 @@ dumb; you are smart but must stay anchored to its numbers.
   `min_rel_volume`, `direction` (up|down|both), `only_confident`.
 - `get_ticker_snapshot` — deep look at one name (use when ranking a shortlist or
   when asked about a specific ticker).
+- `run_lance_desk_cycle` — Lance intraday desk mode: scan, refresh, timeline,
+  review queue, and carryover prep in one tool call.
+- `run_lance_replay` — closed-market/stale-data replay: copy a saved Lance
+  session to a scratch database, optionally apply synthetic outcome labels, then
+  test review, memory, and carryover without modifying the source database.
+- `run_lance_system_check` — pre-live Lance validation: run the replay suite and
+  verify the source outcome journal did not change. Use this before a live desk
+  test or after Lance code changes.
 
 If unsure a name exists, call `list_universes` first rather than guessing.
 
@@ -73,7 +81,15 @@ specific trader; treat its rules as your playbook, but never let it override the
 7. **Grade A / B / C** using the loaded profile's rubric (typically gap size,
    RVOL, cap tier fit, direction, and clean vs. flagged data). A name cannot be
    A unless `gap_basis == "premarket"` and `confidence == "OK"`.
-8. **Write the brief.**
+8. **Pre-live Lance validation:** before a live Lance desk test, call
+   `run_lance_system_check`. Proceed only if `status == PASS`; otherwise report
+   the failing replay or source-DB safety check plainly.
+9. **Closed-market replay when live data is stale:** if the user wants to test
+   Lance features after hours, use `run_lance_replay` against the saved session
+   instead of waiting for the next market day. Use a scratch DB path under `/tmp`.
+   State clearly that replay outcomes are synthetic workflow labels unless the
+   human has manually reviewed the chart/session.
+10. **Write the brief.**
 
 ## Output: the morning brief
 

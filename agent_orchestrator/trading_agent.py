@@ -9,6 +9,12 @@ from agent_orchestrator.models import (
     AgentWatchCandidate,
     WatchBucket,
 )
+from services.session_time_service import (
+    data_caveat_for,
+    format_et,
+    session_banner_for,
+    session_mode_for,
+)
 
 
 Dispatcher = Callable[..., dict[str, Any]]
@@ -39,6 +45,7 @@ class TradingAgentOrchestrator:
         market_limit: int | None = None,
         max_workers: int | None = None,
         all_universes: bool = False,
+        include_rejected: bool = False,
         user_query: str | None = None,
         db_path: str | None = None,
     ) -> AgentRunPacket:
@@ -59,6 +66,8 @@ class TradingAgentOrchestrator:
             tool_input["market_limit"] = market_limit
         if max_workers is not None:
             tool_input["max_workers"] = max_workers
+        if include_rejected:
+            tool_input["include_rejected"] = True
         result = self.dispatcher(
             "scan_small_caps",
             tool_input,
@@ -74,12 +83,14 @@ class TradingAgentOrchestrator:
                     tool_input=tool_input,
                     result_summary=message,
                 ),
+                session_banner=session_banner_for(None),
             )
 
         candidates = list(result.get("candidates") or [])
         candidate_count = result.get("candidate_count", len(candidates))
         packet_watchlist = _empty_watchlist()
         warnings: list[str] = []
+        timestamps: list[str] = []
 
         for raw_candidate in candidates:
             bucket = _bucket_for_grade(str(raw_candidate.get("grade", "")))
@@ -92,9 +103,22 @@ class TradingAgentOrchestrator:
                 warnings.append(
                     f"{candidate.ticker} missing evidence: {', '.join(candidate.missing_fields)}"
                 )
+            if candidate.as_of_utc:
+                timestamps.append(candidate.as_of_utc)
 
         if not candidates:
             warnings.append("No candidates matched the small-cap scanner criteria.")
+            zero_reason = result.get("zero_result_reason")
+            if isinstance(zero_reason, str) and zero_reason:
+                warnings.append(f"zero_result_reason: {zero_reason}")
+            suggestions = result.get("relax_suggestions") or []
+            for suggestion in suggestions:
+                if isinstance(suggestion, str) and suggestion:
+                    warnings.append(f"suggestion: {suggestion}")
+
+        session_banner = str(result.get("session_banner") or "") or _fallback_banner(
+            timestamps
+        )
 
         return AgentRunPacket(
             agent_name=AGENT_NAME,
@@ -112,6 +136,7 @@ class TradingAgentOrchestrator:
             warnings=_dedupe(warnings),
             notes=list(result.get("notes") or []),
             handoff_prompt=_handoff_prompt(),
+            session_banner=session_banner,
         )
 
 
@@ -161,6 +186,10 @@ def _agent_candidate(raw: dict[str, Any], bucket: WatchBucket) -> AgentWatchCand
         evidence.get("missing_fields") if evidence is not None else raw.get("missing_fields")
     )
     gap_basis = _optional_string(raw.get("gap_basis"))
+    confidence = raw.get("confidence")
+    as_of_utc = _optional_string(raw.get("timestamp"))
+    as_of_et = format_et(as_of_utc)
+    session_mode = session_mode_for(as_of_utc)
     return AgentWatchCandidate(
         ticker=str(raw.get("ticker") or "").upper(),
         name=raw.get("name"),
@@ -172,13 +201,21 @@ def _agent_candidate(raw: dict[str, Any], bucket: WatchBucket) -> AgentWatchCand
         volume=_optional_float(raw.get("volume")),
         rel_volume=_optional_float(raw.get("rel_volume")),
         market_cap=_optional_float(raw.get("market_cap")),
-        confidence=raw.get("confidence"),
+        confidence=confidence,
         matched_signals=_string_list(raw.get("matched_signals")),
         missing_fields=missing_fields,
         risk_notes=_string_list(raw.get("risk_notes")),
         sources=_string_list(raw.get("sources")),
         evidence_summary=_evidence_summary(evidence, gap_basis=gap_basis),
         gap_basis=gap_basis,
+        as_of_et=as_of_et,
+        as_of_utc=as_of_utc,
+        session_mode=session_mode,
+        data_caveat=data_caveat_for(
+            as_of_utc,
+            gap_basis=gap_basis,
+            confidence=confidence if isinstance(confidence, str) else None,
+        ),
     )
 
 
@@ -311,6 +348,7 @@ def _error_packet(
     message: str,
     *,
     tool_call: AgentToolCall | None = None,
+    session_banner: str | None = None,
 ) -> AgentRunPacket:
     return AgentRunPacket(
         agent_name=AGENT_NAME,
@@ -322,7 +360,19 @@ def _error_packet(
         warnings=[message],
         notes=[],
         handoff_prompt=_handoff_prompt(),
+        session_banner=session_banner or session_banner_for(None),
     )
+
+
+def _fallback_banner(timestamps: list[str]) -> str:
+    """Pick the most recent candidate timestamp and render a banner.
+
+    Used when the tool layer did not return a session_banner field (older tool
+    implementations, test doubles). Never fabricates a timestamp; returns the
+    OFF_SESSION fallback if no candidate carried one.
+    """
+    latest = max(timestamps) if timestamps else None
+    return session_banner_for(latest)
 
 
 def _handoff_prompt() -> str:
