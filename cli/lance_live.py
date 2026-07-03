@@ -14,6 +14,9 @@ from agent_tools.tools import run_lance_command_center
 
 app = typer.Typer(add_completion=False, help="Run Lance as a live operator console.")
 
+DATA_USED_ROW_LIMIT = 6
+BENCHMARK_ORDER = ["SPY", "QQQ", "IWM", "SMH", "XLK"]
+
 
 @app.command()
 def main(
@@ -55,7 +58,7 @@ def main(
     write_handoff: bool = typer.Option(
         True,
         "--write-handoff/--no-write-handoff",
-        help="Write an agent handoff markdown file after each run.",
+        help="Write agent handoff markdown and JSON artifacts after each run.",
     ),
     previous_json: Path | None = typer.Option(
         None,
@@ -155,13 +158,17 @@ def _render(payload: dict[str, Any], *, handoff_dir: Path, write_handoff: bool) 
     typer.echo(f"Status: {_value(payload.get('status'))}")
     _render_session(payload)
     _render_buckets(payload)
+    _render_data_used(payload)
     _render_changes(payload)
     _render_data_doctor(payload)
+    _render_next_actions(payload)
     _render_outcome(payload)
     _render_handoff(payload)
     if write_handoff:
-        path = _write_handoff(payload, handoff_dir=handoff_dir)
-        typer.echo(f"Handoff written: {path}")
+        handoff_path = _write_handoff(payload, handoff_dir=handoff_dir)
+        json_path = _write_payload_json(payload, handoff_dir=handoff_dir)
+        typer.echo(f"Handoff written: {handoff_path}")
+        typer.echo(f"JSON written: {json_path}")
     disclaimer = str(payload.get("disclaimer") or "")
     if disclaimer:
         typer.echo("")
@@ -186,6 +193,15 @@ def _render_buckets(payload: dict[str, Any]) -> None:
     typer.echo(f"Blocked/Data Caveat: {_join(read.get('blocked_data_quality') or [])}")
 
 
+def _render_data_used(payload: dict[str, Any]) -> None:
+    lines = _data_used_lines(payload)
+    if not lines:
+        return
+    _section("Data Lance Used")
+    for line in lines:
+        typer.echo(line)
+
+
 def _render_changes(payload: dict[str, Any]) -> None:
     tracker = payload.get("tracker") if isinstance(payload.get("tracker"), dict) else None
     if not tracker:
@@ -208,6 +224,22 @@ def _render_data_doctor(payload: dict[str, Any]) -> None:
             typer.echo(f"{key}: {_join(values)}")
     for action in doctor.get("next_actions") or []:
         typer.echo(f"- {_value(action)}")
+
+
+def _render_next_actions(payload: dict[str, Any]) -> None:
+    workflow_commands = payload.get("workflow_commands")
+    if not isinstance(workflow_commands, dict) or not workflow_commands:
+        handoff = payload.get("agent_handoff") if isinstance(payload.get("agent_handoff"), dict) else {}
+        workflow_commands = handoff.get("next_commands") if isinstance(handoff.get("next_commands"), dict) else {}
+    if not workflow_commands:
+        return
+    _section("Next Actions")
+    for key in ["now", "watch", "tomorrow", "review"]:
+        if key in workflow_commands:
+            typer.echo(f"{key}={_value(workflow_commands.get(key))}")
+    for key, value in workflow_commands.items():
+        if key not in {"now", "watch", "tomorrow", "review"}:
+            typer.echo(f"{key}={_value(value)}")
 
 
 def _render_outcome(payload: dict[str, Any]) -> None:
@@ -240,10 +272,21 @@ def _write_handoff(payload: dict[str, Any], *, handoff_dir: Path) -> Path:
     return path
 
 
+def _write_payload_json(payload: dict[str, Any], *, handoff_dir: Path) -> Path:
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    path = handoff_dir / "latest_command_center.json"
+    content = json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
 def _handoff_markdown(payload: dict[str, Any]) -> str:
     handoff = payload.get("agent_handoff") if isinstance(payload.get("agent_handoff"), dict) else {}
     session_ids = handoff.get("session_ids") if isinstance(handoff.get("session_ids"), dict) else {}
     commands = handoff.get("next_commands") if isinstance(handoff.get("next_commands"), dict) else {}
+    doctor = payload.get("data_doctor") if isinstance(payload.get("data_doctor"), dict) else {}
+    doctor_read = doctor.get("doctor_read") if isinstance(doctor.get("doctor_read"), dict) else {}
+    root_causes = doctor.get("root_causes") if isinstance(doctor.get("root_causes"), dict) else {}
     lines = [
         "# Lance Agent Handoff",
         "",
@@ -256,8 +299,34 @@ def _handoff_markdown(payload: dict[str, Any]) -> str:
         f"data_doctor: {_value(handoff.get('data_doctor'))}",
         f"pending_review_tickers: {_join(handoff.get('pending_review_tickers') or [])}",
         "",
-        "## Next Commands",
+        "## Data Lance Used",
     ]
+    data_used = _data_used_lines(payload)
+    lines.extend(data_used or ["none"])
+    lines.extend(
+        [
+            "",
+            "## Data Doctor",
+            f"summary: {_value(doctor_read.get('one_liner') or handoff.get('data_doctor'))}",
+        ]
+    )
+    for key in ["provider_failure", "missing_price", "stale_or_off_session", "halted", "confidence", "unknown"]:
+        values = root_causes.get(key) if isinstance(root_causes.get(key), list) else []
+        if values:
+            lines.append(f"{key}: {_join(values)}")
+    for action in doctor.get("next_actions") or []:
+        lines.append(f"next_action: {_value(action)}")
+    lines.extend(
+        [
+            "",
+            "## Agent Task Prompt",
+            "Use latest_command_center.json as the source of truth before rerunning scans. "
+            "Preserve data-quality caveats, inspect blocked names first, then continue Lance's "
+            "watch-cycle from the active_monitor and swing_watch lists.",
+            "",
+            "## Next Commands",
+        ]
+    )
     for key, value in commands.items():
         lines.append(f"{key}: {_value(value)}")
     if handoff.get("handoff_prompt"):
@@ -266,6 +335,97 @@ def _handoff_markdown(payload: dict[str, Any]) -> str:
     if disclaimer:
         lines.extend(["", disclaimer])
     return "\n".join(lines) + "\n"
+
+
+def _data_used_lines(payload: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    benchmark_lines = _benchmark_lines(payload)
+    if benchmark_lines:
+        lines.extend(benchmark_lines)
+    rows = _candidate_evidence_rows(payload)
+    if rows:
+        for row in rows[:DATA_USED_ROW_LIMIT]:
+            lines.append(_format_candidate_evidence(row))
+        remaining = len(rows) - DATA_USED_ROW_LIMIT
+        if remaining > 0:
+            lines.append(f"... {remaining} more row(s) in latest_command_center.json")
+    return lines
+
+
+def _benchmark_lines(payload: dict[str, Any]) -> list[str]:
+    full_cycle = payload.get("full_cycle") if isinstance(payload.get("full_cycle"), dict) else {}
+    context = full_cycle.get("market_context") if isinstance(full_cycle.get("market_context"), dict) else {}
+    benchmarks = context.get("benchmarks") if isinstance(context.get("benchmarks"), dict) else {}
+    symbols = [symbol for symbol in BENCHMARK_ORDER if symbol in benchmarks]
+    known_symbols = set(BENCHMARK_ORDER)
+    symbols.extend(sorted(symbol for symbol in benchmarks if symbol not in known_symbols))
+    return [_format_benchmark(symbol, benchmarks[symbol]) for symbol in symbols[:5] if isinstance(benchmarks[symbol], dict)]
+
+
+def _candidate_evidence_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    full_cycle = payload.get("full_cycle") if isinstance(payload.get("full_cycle"), dict) else {}
+    for key in ["combined_watchlist", "top_intraday_watchlist", "top_swing_watchlist", "top_updates"]:
+        rows = full_cycle.get(key)
+        if isinstance(rows, list) and rows:
+            return [row for row in rows if isinstance(row, dict)]
+    return []
+
+
+def _format_benchmark(symbol: str, data: dict[str, Any]) -> str:
+    sources = _format_sources(data.get("sources"))
+    return (
+        f"{symbol}: gap={_format_pct(data.get('gap_pct'))} "
+        f"basis={_value(data.get('gap_basis'))} "
+        f"confidence={_value(data.get('confidence'))} "
+        f"as_of={_value(data.get('as_of') or data.get('as_of_et'))} "
+        f"sources={sources}"
+    )
+
+
+def _format_candidate_evidence(row: dict[str, Any]) -> str:
+    data_quality = row.get("data_quality") if isinstance(row.get("data_quality"), dict) else {}
+    parts = [
+        _value(row.get("ticker")),
+        f"intraday={_value(row.get('intraday_state') or row.get('state'))}",
+        f"swing={_value(row.get('swing_state'))}",
+        f"playbook={_value(row.get('intraday_playbook') or row.get('playbook') or row.get('swing_playbook'))}",
+        f"price={_format_price(data_quality.get('latest_price'))}",
+        f"gap={_format_pct(data_quality.get('gap_pct'))}",
+        f"rvol={_format_multiple(data_quality.get('rel_volume'))}",
+        f"basis={_value(data_quality.get('gap_basis'))}",
+        f"confidence={_value(data_quality.get('confidence'))}",
+        f"status={_value(data_quality.get('data_status'))}",
+        f"as_of={_value(data_quality.get('as_of_et') or data_quality.get('as_of'))}",
+        f"sources={_format_sources(data_quality.get('sources'))}",
+    ]
+    caveat = data_quality.get("data_caveat")
+    if caveat:
+        parts.append(f"caveat={_value(caveat)}")
+    return " | ".join(parts)
+
+
+def _format_pct(value: Any) -> str:
+    if not isinstance(value, int | float):
+        return "unknown"
+    return f"{float(value):.2f}%"
+
+
+def _format_price(value: Any) -> str:
+    if not isinstance(value, int | float):
+        return "unknown"
+    return f"{float(value):.2f}"
+
+
+def _format_multiple(value: Any) -> str:
+    if not isinstance(value, int | float):
+        return "unknown"
+    return f"{float(value):.2f}x"
+
+
+def _format_sources(value: Any) -> str:
+    if not isinstance(value, list) or not value:
+        return "none"
+    return ",".join(_value(source) for source in value)
 
 
 def _load_previous(path: Path | None) -> dict[str, Any] | None:
