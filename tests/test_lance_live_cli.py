@@ -1,0 +1,158 @@
+from __future__ import annotations
+
+from typer.testing import CliRunner
+
+
+runner = CliRunner()
+
+
+def _payload(summary: str = "1 active monitor, 0 swing watches, 1 blocked/data-caveat, 0 pending reviews.") -> dict:
+    return {
+        "agent_name": "lance_full_cycle",
+        "mode": "command_center",
+        "status": "OK",
+        "session_ids": {
+            "intraday": "2026-07-03-lance-intraday",
+            "swing": "2026-07-03-lance-swing",
+        },
+        "single_run_read": {
+            "one_liner": summary,
+            "active_monitor": ["IBM"],
+            "swing_watch": [],
+            "blocked_data_quality": ["MU"],
+            "pending_review_count": 0,
+        },
+        "tracker": {
+            "one_liner": "1 new, 0 upgraded, 0 downgraded, 0 unchanged, 0 removed, 1 data caveat.",
+        },
+        "data_doctor": {
+            "doctor_read": {
+                "one_liner": "1 ready, 1 blocked. Main blockers: provider_failure=1."
+            },
+            "root_causes": {
+                "ready": ["IBM"],
+                "provider_failure": ["MU"],
+                "missing_price": ["MU"],
+                "stale_or_off_session": [],
+                "halted": [],
+                "confidence": ["MU"],
+                "unknown": [],
+            },
+            "next_actions": ["Check provider connectivity/credentials before trusting Lance output."],
+        },
+        "outcome_loop": {
+            "pending_review_count": 0,
+            "pending_review_tickers": [],
+            "journal_commands": [],
+            "review_command": ".venv/bin/python -m cli.lance_full_cycle_eod review --intraday-session-id 2026-07-03-lance-intraday --swing-session-id 2026-07-03-lance-swing",
+            "journal_tool": "journal_lance_full_cycle_outcome",
+        },
+        "workflow_commands": {
+            "now": ".venv/bin/python -m cli.lance --tickers IBM,MU",
+            "watch": ".venv/bin/python -m cli.lance_full_cycle --tickers IBM,MU --watch 30",
+            "tomorrow": ".venv/bin/python -m cli.lance_dashboard tomorrow --intraday-session-id 2026-07-03-lance-intraday --swing-session-id 2026-07-03-lance-swing",
+        },
+        "agent_handoff": {
+            "summary": summary,
+            "session_ids": {
+                "intraday": "2026-07-03-lance-intraday",
+                "swing": "2026-07-03-lance-swing",
+            },
+            "active_monitor": ["IBM"],
+            "swing_watch": [],
+            "blocked_data_quality": ["MU"],
+            "data_doctor": "1 ready, 1 blocked. Main blockers: provider_failure=1.",
+            "pending_review_tickers": [],
+            "next_commands": {
+                "now": ".venv/bin/python -m cli.lance --tickers IBM,MU",
+                "watch": ".venv/bin/python -m cli.lance_full_cycle --tickers IBM,MU --watch 30",
+            },
+            "handoff_prompt": "Preserve data-quality caveats.",
+        },
+        "disclaimer": "Matches your filter - not buy/sell advice. Verify before acting.",
+    }
+
+
+def test_lance_live_prints_operator_console_and_writes_handoff(monkeypatch, tmp_path):
+    from cli import lance_live
+
+    calls: list[dict] = []
+
+    def fake_run(**kwargs):
+        calls.append(kwargs)
+        return _payload()
+
+    monkeypatch.setattr(lance_live, "run_lance_command_center", fake_run)
+
+    result = runner.invoke(
+        lance_live.app,
+        [
+            "--tickers",
+            "IBM,MU",
+            "--target-session-date",
+            "2026-07-06",
+            "--handoff-dir",
+            str(tmp_path),
+            "--no-persist",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls[0]["tickers"] == "IBM,MU"
+    assert calls[0]["persist"] is False
+    assert calls[0]["previous"] is None
+    assert "Lance Live Operator" in result.stdout
+    assert "Session" in result.stdout
+    assert "Active Monitor: IBM" in result.stdout
+    assert "Blocked / Data Doctor" in result.stdout
+    assert "provider_failure: MU" in result.stdout
+    assert "Agent Handoff" in result.stdout
+    assert "Handoff written:" in result.stdout
+
+    handoff = tmp_path / "latest_agent_handoff.md"
+    assert handoff.exists()
+    content = handoff.read_text(encoding="utf-8")
+    assert "# Lance Agent Handoff" in content
+    assert "summary: 1 active monitor" in content
+    assert "blocked_data_quality: MU" in content
+    assert "now: .venv/bin/python -m cli.lance --tickers IBM,MU" in content
+    assert "Matches your filter - not buy/sell advice. Verify before acting." in content
+
+
+def test_lance_live_watch_carries_previous_payload(monkeypatch, tmp_path):
+    from cli import lance_live
+
+    payloads = [
+        _payload("1 active monitor, 0 swing watches, 0 blocked/data-caveat names, 0 pending reviews."),
+        _payload("0 active monitors, 0 swing watches, 1 blocked/data-caveat, 0 pending reviews."),
+    ]
+    calls: list[dict] = []
+
+    def fake_run(**kwargs):
+        calls.append(kwargs)
+        return payloads.pop(0)
+
+    monkeypatch.setattr(lance_live, "run_lance_command_center", fake_run)
+
+    result = runner.invoke(
+        lance_live.app,
+        [
+            "--tickers",
+            "IBM",
+            "--watch",
+            "0",
+            "--watch-iterations",
+            "2",
+            "--handoff-dir",
+            str(tmp_path),
+            "--no-persist",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Lance Live Watch: every 0 seconds" in result.stdout
+    assert "Cycle 1" in result.stdout
+    assert "Cycle 2" in result.stdout
+    assert calls[0]["previous"] is None
+    assert calls[1]["previous"]["mode"] == "command_center"
+    assert (tmp_path / "latest_agent_handoff.md").exists()
