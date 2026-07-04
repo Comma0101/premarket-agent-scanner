@@ -78,6 +78,39 @@ def _payload() -> dict:
             },
             "next_actions": ["Resolve stale/off-session data before treating rows as live."],
         },
+        "decision_brief": {
+            "mode": "decision_brief",
+            "lance_posture": "stand_down",
+            "headline": "Stand down: market is closed and 1 ticker(s) are blocked by data quality.",
+            "focus": [
+                {
+                    "ticker": "IBM",
+                    "lane": "intraday",
+                    "state": "triggered_reference",
+                    "playbook": "mean_reversion_after_capitulation",
+                    "why": "Right-side turn after capitulation.",
+                    "waiting_for": ["hold above prior 2-minute high"],
+                    "invalidates_if": ["breaks prior 2-minute low"],
+                    "data_quality": "confidence=OK / gap_basis=premarket / as_of=Jul 3 9:45 AM ET",
+                }
+            ],
+            "swing_watch": [],
+            "blocked": [
+                {
+                    "ticker": "AAOI",
+                    "reason": "confidence=STALE_DATA / gap_basis=last_trade / status=stale",
+                    "caveat": "POST_MARKET: last_trade / STALE_DATA",
+                }
+            ],
+            "omitted": [{"ticker": "ARM", "reason": "filtered out"}],
+            "what_would_change": [
+                "Resolve stale/off-session data before treating rows as live.",
+                "IBM: breaks prior 2-minute low",
+            ],
+            "talk_track": [
+                "No Lance live action context: market is closed and current rows are caveated."
+            ],
+        },
         "tomorrow_prep": {
             "fresh_scan_required": True,
             "watchlist": ["IBM", "MU", "AAOI"],
@@ -219,6 +252,12 @@ def test_lance_cli_prints_command_center(monkeypatch):
     assert "Active Monitor: IBM" in result.stdout
     assert "Swing Watch: MU" in result.stdout
     assert "Blocked/Data Caveat: AAOI" in result.stdout
+    assert "Lance Decision Brief" in result.stdout
+    assert "posture=stand_down" in result.stdout
+    assert "Stand down: market is closed" in result.stdout
+    assert "focus IBM intraday triggered_reference mean_reversion_after_capitulation" in result.stdout
+    assert "blocked AAOI confidence=STALE_DATA / gap_basis=last_trade / status=stale" in result.stdout
+    assert "change IBM: breaks prior 2-minute low" in result.stdout
     assert "Data Lance Used" in result.stdout
     assert "SPY: gap=0.42% basis=premarket confidence=OK" in result.stdout
     assert "IBM | intraday=triggered_reference | swing=unknown" in result.stdout

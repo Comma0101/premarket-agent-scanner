@@ -52,6 +52,39 @@ def _payload(summary: str = "1 active monitor, 0 swing watches, 1 blocked/data-c
             },
             "next_actions": ["Check provider connectivity/credentials before trusting Lance output."],
         },
+        "decision_brief": {
+            "mode": "decision_brief",
+            "lance_posture": "stand_down",
+            "headline": "Stand down: market is closed and 1 ticker(s) are blocked by data quality.",
+            "focus": [
+                {
+                    "ticker": "IBM",
+                    "lane": "intraday",
+                    "state": "active_monitor",
+                    "playbook": "mean_reversion",
+                    "why": "Right-side turn after capitulation.",
+                    "waiting_for": ["hold above prior 2-minute high"],
+                    "invalidates_if": ["breaks prior 2-minute low"],
+                    "data_quality": "confidence=OK / gap_basis=premarket / as_of=Jul 3 9:30 AM ET",
+                }
+            ],
+            "swing_watch": [],
+            "blocked": [
+                {
+                    "ticker": "MU",
+                    "reason": "confidence=ERROR / gap_basis=unknown / status=provider_failure",
+                    "caveat": "provider failure",
+                }
+            ],
+            "omitted": [{"ticker": "ARM", "reason": "filtered out"}],
+            "what_would_change": [
+                "Check provider connectivity/credentials before trusting Lance output.",
+                "IBM: breaks prior 2-minute low",
+            ],
+            "talk_track": [
+                "No Lance live action context: market is closed and current rows are caveated."
+            ],
+        },
         "outcome_loop": {
             "pending_review_count": 0,
             "pending_review_tickers": [],
@@ -189,6 +222,10 @@ def test_lance_live_prints_operator_console_and_writes_handoff(monkeypatch, tmp_
     assert "MARKET_CLOSED, Jul 3 10:00 AM ET" in result.stdout
     assert "Independence Day observed" in result.stdout
     assert "Active Monitor: IBM" in result.stdout
+    assert "Lance Decision Brief" in result.stdout
+    assert "posture=stand_down" in result.stdout
+    assert "focus IBM intraday active_monitor mean_reversion" in result.stdout
+    assert "blocked MU confidence=ERROR / gap_basis=unknown / status=provider_failure" in result.stdout
     assert "Data Lance Used" in result.stdout
     assert "SPY: gap=0.42% basis=premarket confidence=OK" in result.stdout
     assert "IBM | intraday=active_monitor | swing=watch" in result.stdout
@@ -216,6 +253,10 @@ def test_lance_live_prints_operator_console_and_writes_handoff(monkeypatch, tmp_
     assert "# Lance Agent Handoff" in content
     assert "summary: 1 active monitor" in content
     assert "blocked_data_quality: MU" in content
+    assert "## Lance Decision Brief" in content
+    assert "headline: Stand down: market is closed" in content
+    assert "focus: IBM intraday active_monitor mean_reversion" in content
+    assert "blocked: MU confidence=ERROR / gap_basis=unknown / status=provider_failure" in content
     assert "## Data Lance Used" in content
     assert "IBM | intraday=active_monitor | swing=watch" in content
     assert "sources=alpaca,yfinance" in content

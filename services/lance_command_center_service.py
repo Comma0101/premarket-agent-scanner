@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from services.lance_decision_brief_service import LanceDecisionBriefService
 from services.lance_market_scan_service import DISCLAIMER
 
 
@@ -83,7 +84,18 @@ class LanceCommandCenterService:
         data_doctor = self.data_doctor_service.from_signal_quality(signal_quality)
         session_ids = _session_ids(full_cycle)
         data_used = _data_used(full_cycle)
-        return {
+        single_run_read = _single_run_read(full_cycle, signal_quality)
+        tomorrow_prep = _tomorrow_prep(full_cycle)
+        outcome_loop = _outcome_loop(full_cycle)
+        workflow_commands = _workflow_commands(
+            tickers=tickers,
+            universe=universe,
+            watchlist=watchlist,
+            all_universes=all_universes,
+            target_session_date=target_session_date,
+            session_ids=session_ids,
+        )
+        output = {
             "agent_name": "lance_full_cycle",
             "mode": "command_center",
             "strategy": "Lance command center single-run workflow",
@@ -91,46 +103,36 @@ class LanceCommandCenterService:
             "session_banner": full_cycle.get("session_banner"),
             "session_context": full_cycle.get("session_context") or {},
             "session_ids": session_ids,
-            "single_run_read": _single_run_read(full_cycle, signal_quality),
+            "single_run_read": single_run_read,
             "tracker": tracker,
             "signal_quality": signal_quality,
             "selection_audit": full_cycle.get("selection_audit") or {},
             "data_used": data_used,
             "data_doctor": data_doctor,
-            "tomorrow_prep": _tomorrow_prep(full_cycle),
-            "outcome_loop": _outcome_loop(full_cycle),
-            "workflow_commands": _workflow_commands(
-                tickers=tickers,
-                universe=universe,
-                watchlist=watchlist,
-                all_universes=all_universes,
-                target_session_date=target_session_date,
-                session_ids=session_ids,
-            ),
-            "agent_handoff": _agent_handoff(
-                single_run_read=_single_run_read(full_cycle, signal_quality),
-                session_ids=session_ids,
-                data_doctor=data_doctor,
-                data_used=data_used,
-                session_banner=full_cycle.get("session_banner"),
-                selection_audit=full_cycle.get("selection_audit") or {},
-                outcome_loop=_outcome_loop(full_cycle),
-                workflow_commands=_workflow_commands(
-                    tickers=tickers,
-                    universe=universe,
-                    watchlist=watchlist,
-                    all_universes=all_universes,
-                    target_session_date=target_session_date,
-                    session_ids=session_ids,
-                ),
-            ),
+            "tomorrow_prep": tomorrow_prep,
+            "outcome_loop": outcome_loop,
+            "workflow_commands": workflow_commands,
             "full_cycle": full_cycle,
             "notes": [
                 "Command center composes existing Lance services; scanner numbers stay in the data layer.",
                 "Carryover/tomorrow rows require a fresh scan before live use.",
             ],
             "disclaimer": full_cycle.get("disclaimer") or DISCLAIMER,
-    }
+        }
+        decision_brief = LanceDecisionBriefService().build(output)
+        output["decision_brief"] = decision_brief
+        output["agent_handoff"] = _agent_handoff(
+            single_run_read=single_run_read,
+            session_ids=session_ids,
+            data_doctor=data_doctor,
+            data_used=data_used,
+            session_banner=full_cycle.get("session_banner"),
+            selection_audit=full_cycle.get("selection_audit") or {},
+            decision_brief=decision_brief,
+            outcome_loop=outcome_loop,
+            workflow_commands=workflow_commands,
+        )
+        return output
 
 
 def _agent_handoff(
@@ -141,6 +143,7 @@ def _agent_handoff(
     data_used: dict[str, Any],
     session_banner: Any,
     selection_audit: dict[str, Any],
+    decision_brief: dict[str, Any],
     outcome_loop: dict[str, Any],
     workflow_commands: dict[str, str],
 ) -> dict[str, Any]:
@@ -155,6 +158,7 @@ def _agent_handoff(
         "data_used": data_used,
         "session_banner": session_banner,
         "selection_audit": selection_audit,
+        "decision_brief": decision_brief,
         "pending_review_tickers": list(outcome_loop.get("pending_review_tickers") or []),
         "next_commands": workflow_commands,
         "handoff_prompt": (

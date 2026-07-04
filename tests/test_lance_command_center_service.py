@@ -221,6 +221,14 @@ def test_lance_command_center_runs_full_cycle_and_builds_single_read():
     )
     assert output["data_doctor"]["root_causes"]["ready"] == ["IBM", "MU"]
     assert output["data_doctor"]["root_causes"]["stale_or_off_session"] == ["AAOI"]
+    assert output["decision_brief"]["mode"] == "decision_brief"
+    assert output["decision_brief"]["lance_posture"] == "stand_down"
+    assert output["decision_brief"]["headline"] == (
+        "Stand down: market is closed and 1 ticker(s) are blocked by data quality."
+    )
+    assert output["decision_brief"]["focus"][0]["ticker"] == "IBM"
+    assert output["decision_brief"]["swing_watch"][0]["ticker"] == "MU"
+    assert output["decision_brief"]["blocked"][0]["ticker"] == "AAOI"
     assert output["tracker"]["one_liner"].startswith("1 new")
     assert output["tomorrow_prep"]["fresh_scan_required"] is True
     assert output["tomorrow_prep"]["watchlist"] == ["IBM", "MU", "AAOI"]
@@ -286,6 +294,7 @@ def test_lance_command_center_runs_full_cycle_and_builds_single_read():
         "data_used": output["data_used"],
         "session_banner": output["session_banner"],
         "selection_audit": output["selection_audit"],
+        "decision_brief": output["decision_brief"],
         "pending_review_tickers": ["IBM"],
         "next_commands": output["workflow_commands"],
         "handoff_prompt": (

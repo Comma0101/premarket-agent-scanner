@@ -162,6 +162,7 @@ def _render(payload: dict[str, Any]) -> None:
     typer.echo(f"Active Monitor: {_join(read.get('active_monitor') or [])}")
     typer.echo(f"Swing Watch: {_join(read.get('swing_watch') or [])}")
     typer.echo(f"Blocked/Data Caveat: {_join(read.get('blocked_data_quality') or [])}")
+    _render_decision_brief(payload)
     _render_data_used(payload)
     _render_selection_audit(payload)
 
@@ -274,6 +275,59 @@ def _render_data_used(payload: dict[str, Any]) -> None:
     _section("Data Lance Used")
     for line in lines:
         typer.echo(line)
+
+
+def _render_decision_brief(payload: dict[str, Any]) -> None:
+    brief = payload.get("decision_brief")
+    if not isinstance(brief, dict):
+        return
+    _section("Lance Decision Brief")
+    typer.echo(f"posture={_value(brief.get('lance_posture'))}")
+    if brief.get("headline"):
+        typer.echo(_value(brief.get("headline")))
+    for line in brief.get("talk_track") or []:
+        typer.echo(f"talk={_value(line)}")
+    for row in brief.get("focus") or []:
+        if not isinstance(row, dict):
+            continue
+        typer.echo(
+            " ".join([
+                f"focus {_value(row.get('ticker'))}",
+                _value(row.get("lane")),
+                _value(row.get("state")),
+                _value(row.get("playbook")),
+            ])
+        )
+        if row.get("data_quality"):
+            typer.echo(f"  data={_value(row.get('data_quality'))}")
+        if row.get("why"):
+            typer.echo(f"  why={_value(row.get('why'))}")
+        for item in row.get("waiting_for") or []:
+            typer.echo(f"  waiting_for={_value(item)}")
+        for item in row.get("invalidates_if") or []:
+            typer.echo(f"  invalidates_if={_value(item)}")
+    for row in brief.get("swing_watch") or []:
+        if not isinstance(row, dict):
+            continue
+        typer.echo(
+            " ".join([
+                f"swing {_value(row.get('ticker'))}",
+                _value(row.get("state")),
+                _value(row.get("playbook")),
+            ])
+        )
+        if row.get("data_quality"):
+            typer.echo(f"  data={_value(row.get('data_quality'))}")
+        if row.get("why"):
+            typer.echo(f"  why={_value(row.get('why'))}")
+    for row in brief.get("blocked") or []:
+        if not isinstance(row, dict):
+            continue
+        typer.echo(f"blocked {_value(row.get('ticker'))} {_value(row.get('reason'))}")
+        if row.get("caveat"):
+            typer.echo(f"  caveat={_value(row.get('caveat'))}")
+    for item in brief.get("what_would_change") or []:
+        typer.echo(f"change {_value(item)}")
 
 
 def _render_selection_audit(payload: dict[str, Any]) -> None:
