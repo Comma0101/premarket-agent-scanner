@@ -10,7 +10,7 @@ from typing import Any
 import typer
 
 from agent_tools.tools import run_lance_command_center
-from cli.lance_data_used import data_used_lines
+from cli.lance_data_used import data_used_lines, selection_audit_lines
 
 
 app = typer.Typer(add_completion=False, help="Run the Lance command center.")
@@ -157,10 +157,13 @@ def _render(payload: dict[str, Any]) -> None:
     read = payload.get("single_run_read") if isinstance(payload.get("single_run_read"), dict) else {}
     if read.get("one_liner"):
         typer.echo(_value(read.get("one_liner")))
+    if payload.get("session_banner"):
+        typer.echo(_value(payload.get("session_banner")))
     typer.echo(f"Active Monitor: {_join(read.get('active_monitor') or [])}")
     typer.echo(f"Swing Watch: {_join(read.get('swing_watch') or [])}")
     typer.echo(f"Blocked/Data Caveat: {_join(read.get('blocked_data_quality') or [])}")
     _render_data_used(payload)
+    _render_selection_audit(payload)
 
     tracker = payload.get("tracker") if isinstance(payload.get("tracker"), dict) else None
     if tracker:
@@ -266,6 +269,15 @@ def _render_data_used(payload: dict[str, Any]) -> None:
     if not lines:
         return
     _section("Data Lance Used")
+    for line in lines:
+        typer.echo(line)
+
+
+def _render_selection_audit(payload: dict[str, Any]) -> None:
+    lines = selection_audit_lines(payload)
+    if not lines:
+        return
+    _section("Requested Ticker Coverage")
     for line in lines:
         typer.echo(line)
 

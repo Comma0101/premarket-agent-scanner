@@ -395,3 +395,28 @@ def test_lance_full_cycle_defaults_to_all_universes_when_no_selector():
     assert swing.calls[0]["all_universes"] is False
     assert output["session_workflow"]["triage_mode"] == "full_universe_intraday_first"
     assert output["status"] == "OK"
+
+
+def test_lance_full_cycle_explains_requested_tickers_missing_from_output():
+    output = LanceFullCycleService(
+        desk_cycle_service=FakeDeskCycleService(),
+        swing_cycle_service=FakeSwingCycleService(),
+    ).run(
+        tickers="IBM,MU,ARM",
+        summary_limit=4,
+    )
+
+    assert output["selection_audit"] == {
+        "requested_tickers": ["IBM", "MU", "ARM"],
+        "returned_tickers": ["IBM", "MU"],
+        "omitted_tickers": [
+            {
+                "ticker": "ARM",
+                "reason": (
+                    "Requested ticker did not appear in Lance's summarized combined watchlist; "
+                    "it may have been filtered out, ranked below the summary limit, or blocked "
+                    "before plan construction."
+                ),
+            }
+        ],
+    }

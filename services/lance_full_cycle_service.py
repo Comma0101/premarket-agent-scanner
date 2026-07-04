@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from services.lance_market_scan_service import DISCLAIMER
+from services.session_time_service import market_session_context_for
 
 
 class LanceFullCycleService:
@@ -115,12 +116,15 @@ class LanceFullCycleService:
             summary_limit=summary_limit,
         )
         desk_read = _desk_read(combined, swing_carryover.get("groups") or {})
+        session_context = market_session_context_for()
 
         return {
             "agent_name": "lance_full_cycle",
             "mode": "full_cycle",
             "strategy": "Lance full intraday-plus-swing desk cycle",
             "status": _status(intraday, swing),
+            "session_banner": _session_banner_from_context(session_context),
+            "session_context": session_context,
             "session_ids": {
                 "intraday": intraday.get("session_id"),
                 "swing": swing.get("session_id"),
@@ -140,6 +144,10 @@ class LanceFullCycleService:
                 "combine_lance_watchlists",
             ],
             "summary": _summary(intraday, swing, swing_carryover, combined),
+            "selection_audit": _selection_audit(
+                tickers=tickers,
+                combined_rows=combined,
+            ),
             "desk_read": desk_read,
             "market_context": intraday.get("market_context") or {},
             "top_intraday_watchlist": _compact_intraday_rows(
@@ -373,6 +381,64 @@ def _summary(
         "swing_carryover_count": _int(swing_carryover.get("carryover_count")),
         "combined_ticker_count": len(combined),
     }
+
+
+def _session_banner_from_context(context: dict[str, Any]) -> str:
+    mode = str(context.get("session_mode") or "OFF_SESSION")
+    as_of = context.get("as_of_et")
+    reason = context.get("market_closed_reason")
+    if mode == "MARKET_CLOSED":
+        suffix = f"US equity market closed: {reason}." if reason else "US equity market closed."
+    elif mode == "PRE_MARKET":
+        suffix = "Live premarket quotes are eligible for premarket-gap grading."
+    elif mode == "MARKET_OPEN":
+        suffix = "Regular session; effective price is a regular-session quote."
+    elif mode == "POST_MARKET":
+        suffix = "last_trade means prior/last-session move, not live premarket."
+    else:
+        suffix = "Outside US equity trading hours; effective price is not live."
+    return f"{mode}, {as_of}. {suffix}" if as_of else f"{mode}. {suffix}"
+
+
+def _selection_audit(
+    *,
+    tickers: list[str] | str | None,
+    combined_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    requested = _requested_tickers(tickers)
+    returned = _tickers_from_rows(combined_rows)
+    returned_set = set(returned)
+    omitted = [
+        {
+            "ticker": ticker,
+            "reason": (
+                "Requested ticker did not appear in Lance's summarized combined watchlist; "
+                "it may have been filtered out, ranked below the summary limit, or blocked "
+                "before plan construction."
+            ),
+        }
+        for ticker in requested
+        if ticker not in returned_set
+    ]
+    return {
+        "requested_tickers": requested,
+        "returned_tickers": returned,
+        "omitted_tickers": omitted,
+    }
+
+
+def _requested_tickers(value: list[str] | str | None) -> list[str]:
+    if value is None:
+        return []
+    raw = value if isinstance(value, list) else str(value).split(",")
+    output = []
+    seen = set()
+    for item in raw:
+        ticker = str(item or "").strip().upper()
+        if ticker and ticker not in seen:
+            seen.add(ticker)
+            output.append(ticker)
+    return output
 
 
 def _carryover_summary(carryover: dict[str, Any]) -> dict[str, Any]:

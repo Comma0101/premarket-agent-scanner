@@ -10,7 +10,7 @@ from typing import Any
 import typer
 
 from agent_tools.tools import run_lance_command_center
-from cli.lance_data_used import data_used_lines
+from cli.lance_data_used import data_used_lines, selection_audit_lines
 
 
 app = typer.Typer(add_completion=False, help="Run Lance as a live operator console.")
@@ -157,6 +157,7 @@ def _render(payload: dict[str, Any], *, handoff_dir: Path, write_handoff: bool) 
     _render_session(payload)
     _render_buckets(payload)
     _render_data_used(payload)
+    _render_selection_audit(payload)
     _render_changes(payload)
     _render_data_doctor(payload)
     _render_next_actions(payload)
@@ -181,6 +182,8 @@ def _render_session(payload: dict[str, Any]) -> None:
     read = payload.get("single_run_read") if isinstance(payload.get("single_run_read"), dict) else {}
     if read.get("one_liner"):
         typer.echo(_value(read.get("one_liner")))
+    if payload.get("session_banner"):
+        typer.echo(_value(payload.get("session_banner")))
 
 
 def _render_buckets(payload: dict[str, Any]) -> None:
@@ -196,6 +199,15 @@ def _render_data_used(payload: dict[str, Any]) -> None:
     if not lines:
         return
     _section("Data Lance Used")
+    for line in lines:
+        typer.echo(line)
+
+
+def _render_selection_audit(payload: dict[str, Any]) -> None:
+    lines = selection_audit_lines(payload)
+    if not lines:
+        return
+    _section("Requested Ticker Coverage")
     for line in lines:
         typer.echo(line)
 
@@ -291,6 +303,7 @@ def _handoff_markdown(payload: dict[str, Any]) -> str:
         f"summary: {_value(handoff.get('summary'))}",
         f"intraday_session_id: {_value(session_ids.get('intraday'))}",
         f"swing_session_id: {_value(session_ids.get('swing'))}",
+        f"session_banner: {_value(handoff.get('session_banner') or payload.get('session_banner'))}",
         f"active_monitor: {_join(handoff.get('active_monitor') or [])}",
         f"swing_watch: {_join(handoff.get('swing_watch') or [])}",
         f"blocked_data_quality: {_join(handoff.get('blocked_data_quality') or [])}",
@@ -301,6 +314,9 @@ def _handoff_markdown(payload: dict[str, Any]) -> str:
     ]
     data_used = data_used_lines(payload)
     lines.extend(data_used or ["none"])
+    selection_audit = selection_audit_lines(payload)
+    lines.extend(["", "## Requested Ticker Coverage"])
+    lines.extend(selection_audit or ["none"])
     lines.extend(
         [
             "",

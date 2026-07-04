@@ -17,6 +17,18 @@ def _payload() -> dict:
             "intraday": "2026-07-03-lance-intraday",
             "swing": "2026-07-03-lance-swing",
         },
+        "session_banner": (
+            "MARKET_CLOSED, Jul 3 10:00 AM ET. US equity market closed: "
+            "Independence Day observed."
+        ),
+        "session_context": {
+            "session_mode": "MARKET_CLOSED",
+            "as_of_et": "Jul 3 10:00 AM ET",
+            "trading_date": "2026-07-03",
+            "is_market_open": False,
+            "is_market_holiday": True,
+            "market_closed_reason": "Independence Day observed",
+        },
         "single_run_read": {
             "one_liner": "1 active monitor, 1 swing watch, 1 blocked/data-caveat, 1 pending review.",
             "active_monitor": ["IBM"],
@@ -84,6 +96,11 @@ def _payload() -> dict:
             "now": ".venv/bin/python -m cli.lance --tickers IBM,MU",
             "watch": ".venv/bin/python -m cli.lance_full_cycle --tickers IBM,MU --watch 30",
             "tomorrow": ".venv/bin/python -m cli.lance_dashboard tomorrow --intraday-session-id 2026-07-03-lance-intraday --swing-session-id 2026-07-03-lance-swing",
+        },
+        "selection_audit": {
+            "requested_tickers": ["IBM", "MU", "AAOI", "ARM"],
+            "returned_tickers": ["IBM", "MU", "AAOI"],
+            "omitted_tickers": [{"ticker": "ARM", "reason": "filtered out"}],
         },
         "data_used": {
             "summary": "2 candidate rows, 1 benchmark row.",
@@ -156,6 +173,15 @@ def _payload() -> dict:
                 "benchmarks": [],
                 "source_paths": [],
             },
+            "session_banner": (
+                "MARKET_CLOSED, Jul 3 10:00 AM ET. US equity market closed: "
+                "Independence Day observed."
+            ),
+            "selection_audit": {
+                "requested_tickers": ["IBM", "MU", "AAOI", "ARM"],
+                "returned_tickers": ["IBM", "MU", "AAOI"],
+                "omitted_tickers": [{"ticker": "ARM", "reason": "filtered out"}],
+            },
             "pending_review_tickers": ["IBM"],
             "next_commands": {
                 "now": ".venv/bin/python -m cli.lance --tickers IBM,MU",
@@ -185,6 +211,8 @@ def test_lance_cli_prints_command_center(monkeypatch):
 
     assert result.exit_code == 0
     assert "Lance Command Center" in result.stdout
+    assert "MARKET_CLOSED, Jul 3 10:00 AM ET" in result.stdout
+    assert "Independence Day observed" in result.stdout
     assert "1 active monitor, 1 swing watch" in result.stdout
     assert "Active Monitor: IBM" in result.stdout
     assert "Swing Watch: MU" in result.stdout
@@ -196,6 +224,10 @@ def test_lance_cli_prints_command_center(monkeypatch):
     assert "sources=alpaca,yfinance" in result.stdout
     assert "AAOI | intraday=blocked_data_quality | swing=unknown" in result.stdout
     assert "status=stale" in result.stdout
+    assert "Requested Ticker Coverage" in result.stdout
+    assert "requested=IBM, MU, AAOI, ARM" in result.stdout
+    assert "returned=IBM, MU, AAOI" in result.stdout
+    assert "omitted ARM: filtered out" in result.stdout
     assert "Signal Quality" in result.stdout
     assert "IBM posture=active_monitor" in result.stdout
     assert "AAOI posture=blocked_data_quality" in result.stdout

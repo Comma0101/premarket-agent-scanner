@@ -10,6 +10,8 @@ from services.session_time_service import (
     NY_TZ,
     data_caveat_for,
     format_et,
+    market_session_context_for,
+    ny_date_for,
     parse_iso_utc,
     session_banner_for,
     session_mode_for,
@@ -45,6 +47,10 @@ def test_format_et_handles_midnight_et():
 def test_format_et_handles_evening_et_previous_day_calendar():
     # 02:00 UTC on Jun 30 == 22:00 ET on Jun 29
     assert format_et("2026-06-30T02:00:00Z") == "Jun 29 10:00 PM ET"
+
+
+def test_ny_date_for_uses_new_york_calendar_not_utc_calendar():
+    assert ny_date_for("2026-07-04T00:07:00Z") == "2026-07-03"
 
 
 def test_format_et_handles_noon_et():
@@ -93,6 +99,35 @@ def test_session_banner_premarket_mentions_eligibility():
 
 def test_session_banner_handles_missing_timestamp():
     assert session_banner_for(None).startswith("OFF_SESSION")
+
+
+def test_market_session_context_marks_independence_day_observed_closed():
+    context = market_session_context_for("2026-07-03T14:00:00Z")
+    assert context == {
+        "session_mode": "MARKET_CLOSED",
+        "as_of_et": "Jul 3 10:00 AM ET",
+        "trading_date": "2026-07-03",
+        "is_market_open": False,
+        "is_market_holiday": True,
+        "market_closed_reason": "Independence Day observed",
+    }
+
+
+def test_session_banner_mentions_market_closed_holiday():
+    banner = session_banner_for("2026-07-03T14:00:00Z")
+    assert banner.startswith("MARKET_CLOSED, Jul 3 10:00 AM ET. ")
+    assert "Independence Day observed" in banner
+
+
+def test_data_caveat_mentions_market_closed_holiday():
+    caveat = data_caveat_for(
+        "2026-07-03T14:00:00Z",
+        gap_basis="last_trade",
+        confidence="STALE_DATA",
+    )
+    assert caveat is not None
+    assert caveat.startswith("MARKET_CLOSED:")
+    assert "Independence Day observed" in caveat
 
 
 def test_data_caveat_is_none_for_clean_premarket():

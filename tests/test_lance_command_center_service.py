@@ -17,6 +17,23 @@ class FakeFullCycleService:
                 "intraday": "2026-07-03-lance-intraday",
                 "swing": "2026-07-03-lance-swing",
             },
+            "session_banner": (
+                "MARKET_CLOSED, Jul 3 10:00 AM ET. US equity market closed: "
+                "Independence Day observed."
+            ),
+            "session_context": {
+                "session_mode": "MARKET_CLOSED",
+                "as_of_et": "Jul 3 10:00 AM ET",
+                "trading_date": "2026-07-03",
+                "is_market_open": False,
+                "is_market_holiday": True,
+                "market_closed_reason": "Independence Day observed",
+            },
+            "selection_audit": {
+                "requested_tickers": ["IBM", "MU", "AAOI", "ARM"],
+                "returned_tickers": ["IBM", "MU", "AAOI"],
+                "omitted_tickers": [{"ticker": "ARM", "reason": "filtered out"}],
+            },
             "session_workflow": {
                 "review_command": (
                     ".venv/bin/python -m cli.lance_full_cycle_eod review "
@@ -190,6 +207,9 @@ def test_lance_command_center_runs_full_cycle_and_builds_single_read():
     assert output["agent_name"] == "lance_full_cycle"
     assert output["mode"] == "command_center"
     assert output["status"] == "OK"
+    assert output["session_banner"].startswith("MARKET_CLOSED, Jul 3 10:00 AM ET")
+    assert output["session_context"]["market_closed_reason"] == "Independence Day observed"
+    assert output["selection_audit"]["omitted_tickers"] == [{"ticker": "ARM", "reason": "filtered out"}]
     assert output["single_run_read"]["one_liner"] == (
         "1 active monitor, 1 swing watch, 1 blocked/data-caveat, 1 pending review."
     )
@@ -261,6 +281,8 @@ def test_lance_command_center_runs_full_cycle_and_builds_single_read():
         "blocked_data_quality": ["AAOI"],
         "data_doctor": "2 ready, 1 blocked. Main blockers: stale_or_off_session=1.",
         "data_used": output["data_used"],
+        "session_banner": output["session_banner"],
+        "selection_audit": output["selection_audit"],
         "pending_review_tickers": ["IBM"],
         "next_commands": output["workflow_commands"],
         "handoff_prompt": (

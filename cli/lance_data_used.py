@@ -29,6 +29,27 @@ def data_used_lines(payload: dict[str, Any], *, row_limit: int = DATA_USED_ROW_L
     return lines
 
 
+def selection_audit_lines(payload: dict[str, Any]) -> list[str]:
+    audit = payload.get("selection_audit") if isinstance(payload.get("selection_audit"), dict) else {}
+    requested = audit.get("requested_tickers") if isinstance(audit.get("requested_tickers"), list) else []
+    returned = audit.get("returned_tickers") if isinstance(audit.get("returned_tickers"), list) else []
+    omitted = audit.get("omitted_tickers") if isinstance(audit.get("omitted_tickers"), list) else []
+    if not requested and not returned and not omitted:
+        return []
+    lines = [
+        f"requested={_join_values(requested)}",
+        f"returned={_join_values(returned)}",
+    ]
+    if not omitted:
+        lines.append("omitted=none")
+        return lines
+    for row in omitted:
+        if not isinstance(row, dict):
+            continue
+        lines.append(f"omitted {_value(row.get('ticker'))}: {_value(row.get('reason'))}")
+    return lines
+
+
 def _benchmark_rows_from_full_cycle(payload: dict[str, Any]) -> list[dict[str, Any]]:
     full_cycle = payload.get("full_cycle") if isinstance(payload.get("full_cycle"), dict) else {}
     context = full_cycle.get("market_context") if isinstance(full_cycle.get("market_context"), dict) else {}
@@ -135,6 +156,12 @@ def _format_sources(value: Any) -> str:
     if not isinstance(value, list) or not value:
         return "none"
     return ",".join(_value(source) for source in value)
+
+
+def _join_values(value: Any) -> str:
+    if not isinstance(value, list) or not value:
+        return "none"
+    return ", ".join(_value(item) for item in value)
 
 
 def _value(value: Any) -> str:

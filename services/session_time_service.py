@@ -11,7 +11,7 @@ and bucket existing timestamps.
 
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 NY_TZ = ZoneInfo("America/New_York")
 UTC = timezone.utc
 
-SessionMode = Literal["PRE_MARKET", "MARKET_OPEN", "POST_MARKET", "OFF_SESSION"]
+SessionMode = Literal["PRE_MARKET", "MARKET_OPEN", "POST_MARKET", "OFF_SESSION", "MARKET_CLOSED"]
 
 
 def parse_iso_utc(value: str | None) -> datetime | None:
@@ -57,6 +57,14 @@ def format_et(value: str | datetime | None, *, now: datetime | None = None) -> s
     return f"{ny.strftime('%b %-d')} {hour12}:{minute:02d} {suffix} ET"
 
 
+def ny_date_for(value: str | datetime | None = None, *, now: datetime | None = None) -> str | None:
+    """Return the New York calendar date for a data-layer timestamp."""
+    parsed = _coerce(value, now=now)
+    if parsed is None:
+        return None
+    return parsed.astimezone(NY_TZ).date().isoformat()
+
+
 def session_mode_for(value: str | datetime | None, *, now: datetime | None = None) -> SessionMode:
     """Bucket a UTC timestamp into the active US equity session.
 
@@ -79,6 +87,35 @@ def session_mode_for(value: str | datetime | None, *, now: datetime | None = Non
     return "OFF_SESSION"
 
 
+def market_session_context_for(value: str | datetime | None = None, *, now: datetime | None = None) -> dict[str, object]:
+    """Return human-facing US equity session context, including holidays/weekends."""
+    parsed = _coerce(value, now=now)
+    if parsed is None:
+        parsed = datetime.now(UTC)
+    ny = parsed.astimezone(NY_TZ)
+    closed_reason = market_closed_reason_for(ny.date())
+    if closed_reason:
+        mode: SessionMode = "MARKET_CLOSED"
+    else:
+        mode = session_mode_for(parsed)
+    return {
+        "session_mode": mode,
+        "as_of_et": format_et(parsed),
+        "trading_date": ny.date().isoformat(),
+        "is_market_open": mode == "MARKET_OPEN",
+        "is_market_holiday": closed_reason is not None and closed_reason != "Weekend",
+        "market_closed_reason": closed_reason,
+    }
+
+
+def market_closed_reason_for(day: date) -> str | None:
+    """Return the official/common US equity market close reason for a date."""
+    if day.weekday() >= 5:
+        return "Weekend"
+    holidays = _market_holidays(day.year)
+    return holidays.get(day)
+
+
 def session_banner_for(value: str | datetime | None, *, now: datetime | None = None) -> str:
     """One-line session banner for the top of a morning brief.
 
@@ -87,9 +124,10 @@ def session_banner_for(value: str | datetime | None, *, now: datetime | None = N
     parsed = _coerce(value, now=now)
     if parsed is None:
         return "OFF_SESSION. timestamps unavailable."
-    mode = session_mode_for(parsed)
+    context = market_session_context_for(parsed)
+    mode = str(context["session_mode"])
     et_label = format_et(parsed)
-    suffix = _session_suffix(mode)
+    suffix = _session_suffix(mode, market_closed_reason=context.get("market_closed_reason"))
     if et_label is None:
         return f"{mode}. {suffix}"
     return f"{mode}, {et_label}. {suffix}"
@@ -108,7 +146,8 @@ def data_caveat_for(
     Otherwise returns a single sentence so the desk can drop it into the table.
     """
     parsed = _coerce(timestamp, now=now)
-    mode = session_mode_for(parsed)
+    context = market_session_context_for(parsed)
+    mode = str(context["session_mode"])
     et_label = format_et(parsed)
     as_of = f"as of {et_label}" if et_label is not None else "as of unknown time"
 
@@ -120,8 +159,10 @@ def data_caveat_for(
     confidence_label = confidence or "unknown"
 
     if gap_basis == "last_trade" and confidence == "STALE_DATA":
+        holiday_reason = context.get("market_closed_reason")
+        closed_suffix = f" US equity market closed: {holiday_reason}." if mode == "MARKET_CLOSED" and holiday_reason else ""
         return (
-            f"{mode}: {basis_label} / {confidence_label} {as_of}. "
+            f"{mode}: {basis_label} / {confidence_label} {as_of}.{closed_suffix} "
             "Not a live premarket gap."
         )
     if gap_basis == "last_trade" and mode == "MARKET_OPEN":
@@ -139,7 +180,11 @@ def data_caveat_for(
     return f"{mode}: {basis_label} / {confidence_label} {as_of}."
 
 
-def _session_suffix(mode: SessionMode) -> str:
+def _session_suffix(mode: str, *, market_closed_reason: object | None = None) -> str:
+    if mode == "MARKET_CLOSED":
+        if market_closed_reason:
+            return f"US equity market closed: {market_closed_reason}."
+        return "US equity market closed."
     if mode == "PRE_MARKET":
         return "Live premarket quotes are eligible for premarket-gap grading."
     if mode == "MARKET_OPEN":
@@ -147,6 +192,62 @@ def _session_suffix(mode: SessionMode) -> str:
     if mode == "POST_MARKET":
         return "last_trade means prior/last-session move, not live premarket."
     return "Outside US equity trading hours; effective price is not live."
+
+
+def _market_holidays(year: int) -> dict[date, str]:
+    holidays: dict[date, str] = {}
+    _add_observed(holidays, date(year, 1, 1), "New Year's Day observed")
+    holidays[_nth_weekday(year, 1, 0, 3)] = "Martin Luther King Jr. Day"
+    holidays[_nth_weekday(year, 2, 0, 3)] = "Washington's Birthday"
+    holidays[_good_friday(year)] = "Good Friday"
+    holidays[_last_weekday(year, 5, 0)] = "Memorial Day"
+    _add_observed(holidays, date(year, 6, 19), "Juneteenth observed")
+    _add_observed(holidays, date(year, 7, 4), "Independence Day observed")
+    holidays[_nth_weekday(year, 9, 0, 1)] = "Labor Day"
+    holidays[_nth_weekday(year, 11, 3, 4)] = "Thanksgiving Day"
+    _add_observed(holidays, date(year, 12, 25), "Christmas Day observed")
+    return holidays
+
+
+def _add_observed(holidays: dict[date, str], actual: date, label: str) -> None:
+    if actual.weekday() == 5:
+        observed = actual - timedelta(days=1)
+    elif actual.weekday() == 6:
+        observed = actual + timedelta(days=1)
+    else:
+        observed = actual
+    holidays[observed] = label
+
+
+def _nth_weekday(year: int, month: int, weekday: int, nth: int) -> date:
+    cursor = date(year, month, 1)
+    offset = (weekday - cursor.weekday()) % 7
+    return cursor + timedelta(days=offset + 7 * (nth - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    cursor = date(year + int(month == 12), 1 if month == 12 else month + 1, 1) - timedelta(days=1)
+    offset = (cursor.weekday() - weekday) % 7
+    return cursor - timedelta(days=offset)
+
+
+def _good_friday(year: int) -> date:
+    # Anonymous Gregorian algorithm for Easter Sunday; Good Friday is two days earlier.
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    correction = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * correction) // 451
+    month = (h + correction - 7 * m + 114) // 31
+    day = ((h + correction - 7 * m + 114) % 31) + 1
+    return date(year, month, day) - timedelta(days=2)
 
 
 def _coerce(
@@ -170,7 +271,10 @@ __all__ = [
     "SessionMode",
     "parse_iso_utc",
     "format_et",
+    "ny_date_for",
     "session_mode_for",
+    "market_session_context_for",
+    "market_closed_reason_for",
     "session_banner_for",
     "data_caveat_for",
 ]

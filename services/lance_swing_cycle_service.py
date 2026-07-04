@@ -5,6 +5,7 @@ from typing import Any
 
 from app.db import insert_lance_watchlist_event, upsert_lance_watchlist_item
 from app.models import utc_now_iso
+from services.session_time_service import ny_date_for
 
 
 DISCLAIMER = "Matches your filter - not buy/sell advice. Verify before acting."
@@ -228,7 +229,7 @@ def _parse_tickers(tickers: list[str] | str | None) -> list[str]:
 
 
 def _session_id() -> str:
-    day = utc_now_iso()[:10] or "unknown-date"
+    day = ny_date_for(utc_now_iso()) or utc_now_iso()[:10] or "unknown-date"
     return f"{day}-lance-swing"
 
 

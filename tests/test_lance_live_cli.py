@@ -15,6 +15,18 @@ def _payload(summary: str = "1 active monitor, 0 swing watches, 1 blocked/data-c
             "intraday": "2026-07-03-lance-intraday",
             "swing": "2026-07-03-lance-swing",
         },
+        "session_banner": (
+            "MARKET_CLOSED, Jul 3 10:00 AM ET. US equity market closed: "
+            "Independence Day observed."
+        ),
+        "session_context": {
+            "session_mode": "MARKET_CLOSED",
+            "as_of_et": "Jul 3 10:00 AM ET",
+            "trading_date": "2026-07-03",
+            "is_market_open": False,
+            "is_market_holiday": True,
+            "market_closed_reason": "Independence Day observed",
+        },
         "single_run_read": {
             "one_liner": summary,
             "active_monitor": ["IBM"],
@@ -51,6 +63,11 @@ def _payload(summary: str = "1 active monitor, 0 swing watches, 1 blocked/data-c
             "now": ".venv/bin/python -m cli.lance --tickers IBM,MU",
             "watch": ".venv/bin/python -m cli.lance_full_cycle --tickers IBM,MU --watch 30",
             "tomorrow": ".venv/bin/python -m cli.lance_dashboard tomorrow --intraday-session-id 2026-07-03-lance-intraday --swing-session-id 2026-07-03-lance-swing",
+        },
+        "selection_audit": {
+            "requested_tickers": ["IBM", "MU", "ARM"],
+            "returned_tickers": ["IBM", "MU"],
+            "omitted_tickers": [{"ticker": "ARM", "reason": "filtered out"}],
         },
         "full_cycle": {
             "market_context": {
@@ -117,6 +134,15 @@ def _payload(summary: str = "1 active monitor, 0 swing watches, 1 blocked/data-c
             "swing_watch": [],
             "blocked_data_quality": ["MU"],
             "data_doctor": "1 ready, 1 blocked. Main blockers: provider_failure=1.",
+            "session_banner": (
+                "MARKET_CLOSED, Jul 3 10:00 AM ET. US equity market closed: "
+                "Independence Day observed."
+            ),
+            "selection_audit": {
+                "requested_tickers": ["IBM", "MU", "ARM"],
+                "returned_tickers": ["IBM", "MU"],
+                "omitted_tickers": [{"ticker": "ARM", "reason": "filtered out"}],
+            },
             "pending_review_tickers": [],
             "next_commands": {
                 "now": ".venv/bin/python -m cli.lance --tickers IBM,MU",
@@ -158,6 +184,8 @@ def test_lance_live_prints_operator_console_and_writes_handoff(monkeypatch, tmp_
     assert calls[0]["previous"] is None
     assert "Lance Live Operator" in result.stdout
     assert "Session" in result.stdout
+    assert "MARKET_CLOSED, Jul 3 10:00 AM ET" in result.stdout
+    assert "Independence Day observed" in result.stdout
     assert "Active Monitor: IBM" in result.stdout
     assert "Data Lance Used" in result.stdout
     assert "SPY: gap=0.42% basis=premarket confidence=OK" in result.stdout
@@ -166,6 +194,10 @@ def test_lance_live_prints_operator_console_and_writes_handoff(monkeypatch, tmp_
     assert "sources=alpaca,yfinance" in result.stdout
     assert "MU | intraday=blocked | swing=blocked_data_quality" in result.stdout
     assert "status=provider_failure" in result.stdout
+    assert "Requested Ticker Coverage" in result.stdout
+    assert "requested=IBM, MU, ARM" in result.stdout
+    assert "returned=IBM, MU" in result.stdout
+    assert "omitted ARM: filtered out" in result.stdout
     assert "Blocked / Data Doctor" in result.stdout
     assert "provider_failure: MU" in result.stdout
     assert "Next Actions" in result.stdout
@@ -184,6 +216,8 @@ def test_lance_live_prints_operator_console_and_writes_handoff(monkeypatch, tmp_
     assert "## Data Lance Used" in content
     assert "IBM | intraday=active_monitor | swing=watch" in content
     assert "sources=alpaca,yfinance" in content
+    assert "## Requested Ticker Coverage" in content
+    assert "omitted ARM: filtered out" in content
     assert "## Data Doctor" in content
     assert "provider_failure: MU" in content
     assert "now: .venv/bin/python -m cli.lance --tickers IBM,MU" in content

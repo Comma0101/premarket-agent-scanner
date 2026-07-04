@@ -7,6 +7,7 @@ from app.db import insert_lance_watchlist_event, upsert_lance_watchlist_item
 from app.models import ScanFilters, ScanRunOutput
 from services.lance_intraday_plan_service import LanceIntradayPlanService
 from services.scanner_service import ScannerService
+from services.session_time_service import ny_date_for
 
 
 DISCLAIMER = "Matches your filter - not buy/sell advice. Verify before acting."
@@ -328,5 +329,5 @@ def _format_number(value: Any) -> str:
 
 
 def _session_id(scan_output: ScanRunOutput) -> str:
-    day = (scan_output.started_at or "")[:10] or "unknown-date"
+    day = ny_date_for(scan_output.started_at) or (scan_output.started_at or "")[:10] or "unknown-date"
     return f"{day}-lance-intraday"

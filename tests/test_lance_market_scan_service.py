@@ -186,6 +186,27 @@ def test_lance_market_scan_ranks_triggered_high_participation_candidates_first()
     }
 
 
+def test_lance_market_scan_session_id_uses_new_york_date_from_scan_start():
+    scanner = FakeScannerService([_result("FAST", gap_pct=7.0, rel_volume=4.5)])
+    scanner_started_at = "2026-07-04T00:07:00Z"  # Jul 3 8:07 PM ET.
+    original_scan = scanner.scan
+
+    def fake_scan(**kwargs):
+        output = original_scan(**kwargs)
+        output.started_at = scanner_started_at
+        return output
+
+    scanner.scan = fake_scan
+    output = LanceMarketScanService(
+        scanner_service=scanner,
+        plan_service=FakePlanService({
+            "FAST": _plan("FAST", state="triggered_reference", gap_pct=7.0, rel_volume=4.5)
+        }),
+    ).scan(tickers=["FAST"], max_candidates=1)
+
+    assert output["session_id"] == "2026-07-03-lance-intraday"
+
+
 def test_lance_market_scan_can_include_caveated_context_without_upgrading_quality():
     scanner = FakeScannerService([_result("STALE", gap_pct=6.0, rel_volume=4.0, confidence="STALE_DATA")])
     plans = {
