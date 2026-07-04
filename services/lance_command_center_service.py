@@ -411,6 +411,7 @@ def _workflow_commands(
     return {
         "now": f".venv/bin/python -m cli.lance{selection}{target}",
         "watch": f".venv/bin/python -m cli.lance_full_cycle{selection} --watch 30",
+        "explain": ".venv/bin/python -m cli.lance_explain <TICKER> --payload data/live_sessions/latest_command_center.json",
         "tomorrow": tomorrow,
     }
 

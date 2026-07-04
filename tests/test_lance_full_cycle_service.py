@@ -403,19 +403,32 @@ def test_lance_full_cycle_explains_requested_tickers_missing_from_output():
         swing_cycle_service=FakeSwingCycleService(),
     ).run(
         tickers="IBM,MU,ARM",
-        summary_limit=4,
+        summary_limit=1,
     )
 
     assert output["selection_audit"] == {
         "requested_tickers": ["IBM", "MU", "ARM"],
-        "returned_tickers": ["IBM", "MU"],
+        "returned_tickers": ["IBM"],
+        "intraday_source_tickers": ["IBM"],
+        "swing_source_tickers": ["MU", "IBM"],
         "omitted_tickers": [
             {
-                "ticker": "ARM",
+                "ticker": "MU",
+                "stage": "combine_lance_watchlists",
+                "present_in": ["swing"],
                 "reason": (
-                    "Requested ticker did not appear in Lance's summarized combined watchlist; "
-                    "it may have been filtered out, ranked below the summary limit, or blocked "
-                    "before plan construction."
+                    "Ticker was present in Lance swing source rows but omitted from "
+                    "the combined summary because summary_limit=1."
+                ),
+            },
+            {
+                "ticker": "ARM",
+                "stage": "source_rows",
+                "present_in": [],
+                "reason": (
+                    "Requested ticker did not appear in Lance intraday or swing source rows; "
+                    "it may have been filtered before plan construction, lacked required data, "
+                    "or did not produce a Lance plan."
                 ),
             }
         ],

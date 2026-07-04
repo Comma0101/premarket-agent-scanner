@@ -572,6 +572,34 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "explain_lance_ticker",
+        "description": (
+            "Explain one ticker from a Lance command-center payload or saved "
+            "latest_command_center.json artifact. Returns the exact data Lance used, "
+            "intraday/swing state, waiting/invalidation context, omitted reason when "
+            "applicable, and data-quality caveats. Read-only; no trade advice."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "Ticker to explain.",
+                },
+                "payload": {
+                    "type": ["object", "null"],
+                    "description": "Optional command-center payload. If omitted, payload_path is read.",
+                },
+                "payload_path": {
+                    "type": ["string", "null"],
+                    "description": "Path to a saved latest_command_center.json artifact.",
+                    "default": "data/live_sessions/latest_command_center.json",
+                },
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
         "name": "run_lance_data_doctor",
         "description": (
             "Diagnose why Lance can or cannot evaluate ticker data. Groups snapshot and "
@@ -1394,6 +1422,7 @@ _DISPATCH: dict[str, Callable[..., dict[str, Any]]] = {
     "run_lance_full_cycle": tools.run_lance_full_cycle,
     "track_lance_session_changes": tools.track_lance_session_changes,
     "run_lance_command_center": tools.run_lance_command_center,
+    "explain_lance_ticker": tools.explain_lance_ticker,
     "run_lance_data_doctor": tools.run_lance_data_doctor,
     "review_lance_full_cycle": tools.review_lance_full_cycle,
     "journal_lance_full_cycle_outcome": tools.journal_lance_full_cycle_outcome,

@@ -235,9 +235,12 @@ def _render(payload: dict[str, Any]) -> None:
 
     commands = payload.get("workflow_commands") if isinstance(payload.get("workflow_commands"), dict) else {}
     _section("Workflow Commands")
-    for key in ["now", "watch", "tomorrow"]:
+    for key in ["now", "watch", "explain", "tomorrow"]:
         if commands.get(key):
             typer.echo(f"{key}={_value(commands.get(key))}")
+    for key, value in commands.items():
+        if key not in {"now", "watch", "explain", "tomorrow"}:
+            typer.echo(f"{key}={_value(value)}")
 
     handoff = payload.get("agent_handoff") if isinstance(payload.get("agent_handoff"), dict) else {}
     if handoff:

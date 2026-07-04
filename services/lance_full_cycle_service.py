@@ -147,6 +147,9 @@ class LanceFullCycleService:
             "selection_audit": _selection_audit(
                 tickers=tickers,
                 combined_rows=combined,
+                intraday_rows=intraday.get("top_watchlist") or [],
+                swing_rows=swing.get("top_watchlist") or [],
+                summary_limit=summary_limit,
             ),
             "desk_read": desk_read,
             "market_context": intraday.get("market_context") or {},
@@ -404,27 +407,75 @@ def _selection_audit(
     *,
     tickers: list[str] | str | None,
     combined_rows: list[dict[str, Any]],
+    intraday_rows: list[dict[str, Any]],
+    swing_rows: list[dict[str, Any]],
+    summary_limit: int,
 ) -> dict[str, Any]:
     requested = _requested_tickers(tickers)
     returned = _tickers_from_rows(combined_rows)
     returned_set = set(returned)
+    intraday_source = _tickers_from_rows(intraday_rows)
+    swing_source = _tickers_from_rows(swing_rows)
     omitted = [
-        {
-            "ticker": ticker,
-            "reason": (
-                "Requested ticker did not appear in Lance's summarized combined watchlist; "
-                "it may have been filtered out, ranked below the summary limit, or blocked "
-                "before plan construction."
-            ),
-        }
+        _omitted_ticker_reason(
+            ticker=ticker,
+            intraday_source=intraday_source,
+            swing_source=swing_source,
+            summary_limit=summary_limit,
+        )
         for ticker in requested
         if ticker not in returned_set
     ]
     return {
         "requested_tickers": requested,
         "returned_tickers": returned,
+        "intraday_source_tickers": intraday_source,
+        "swing_source_tickers": swing_source,
         "omitted_tickers": omitted,
     }
+
+
+def _omitted_ticker_reason(
+    *,
+    ticker: str,
+    intraday_source: list[str],
+    swing_source: list[str],
+    summary_limit: int,
+) -> dict[str, Any]:
+    present_in = []
+    if ticker in set(intraday_source):
+        present_in.append("intraday")
+    if ticker in set(swing_source):
+        present_in.append("swing")
+    if present_in:
+        present_label = _present_in_label(present_in)
+        return {
+            "ticker": ticker,
+            "stage": "combine_lance_watchlists",
+            "present_in": present_in,
+            "reason": (
+                f"Ticker was present in Lance {present_label} source rows but omitted from "
+                f"the combined summary because summary_limit={int(summary_limit)}."
+            ),
+        }
+    return {
+        "ticker": ticker,
+        "stage": "source_rows",
+        "present_in": [],
+        "reason": (
+            "Requested ticker did not appear in Lance intraday or swing source rows; "
+            "it may have been filtered before plan construction, lacked required data, "
+            "or did not produce a Lance plan."
+        ),
+    }
+
+
+def _present_in_label(values: list[str]) -> str:
+    if values == ["intraday"]:
+        return "intraday"
+    if values == ["swing"]:
+        return "swing"
+    return "intraday and swing"
 
 
 def _requested_tickers(value: list[str] | str | None) -> list[str]:

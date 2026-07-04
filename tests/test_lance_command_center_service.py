@@ -235,6 +235,9 @@ def test_lance_command_center_runs_full_cycle_and_builds_single_read():
     assert output["outcome_loop"]["journal_tool"] == "journal_lance_full_cycle_outcome"
     assert output["workflow_commands"]["now"].startswith(".venv/bin/python -m cli.lance")
     assert output["workflow_commands"]["watch"].startswith(".venv/bin/python -m cli.lance_full_cycle")
+    assert output["workflow_commands"]["explain"] == (
+        ".venv/bin/python -m cli.lance_explain <TICKER> --payload data/live_sessions/latest_command_center.json"
+    )
     assert output["workflow_commands"]["tomorrow"].startswith(".venv/bin/python -m cli.lance_dashboard tomorrow")
     assert output["data_used"]["summary"] == "3 candidate rows, 1 benchmark row."
     assert output["data_used"]["source_paths"] == [

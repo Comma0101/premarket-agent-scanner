@@ -654,6 +654,25 @@ def run_lance_command_center(
     )
 
 
+def explain_lance_ticker(
+    *,
+    ticker: str,
+    payload: dict[str, Any] | None = None,
+    payload_path: str | None = "data/live_sessions/latest_command_center.json",
+    service: Any | None = None,
+) -> dict[str, Any]:
+    if service is None:
+        from services.lance_ticker_explain_service import LanceTickerExplainService
+
+        service = LanceTickerExplainService()
+
+    return service.explain(
+        ticker=ticker,
+        payload=payload,
+        payload_path=payload_path,
+    )
+
+
 def run_lance_data_doctor(
     *,
     tickers: list[str] | str,

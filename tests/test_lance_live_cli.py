@@ -62,6 +62,7 @@ def _payload(summary: str = "1 active monitor, 0 swing watches, 1 blocked/data-c
         "workflow_commands": {
             "now": ".venv/bin/python -m cli.lance --tickers IBM,MU",
             "watch": ".venv/bin/python -m cli.lance_full_cycle --tickers IBM,MU --watch 30",
+            "explain": ".venv/bin/python -m cli.lance_explain <TICKER> --payload data/live_sessions/latest_command_center.json",
             "tomorrow": ".venv/bin/python -m cli.lance_dashboard tomorrow --intraday-session-id 2026-07-03-lance-intraday --swing-session-id 2026-07-03-lance-swing",
         },
         "selection_audit": {
@@ -147,6 +148,7 @@ def _payload(summary: str = "1 active monitor, 0 swing watches, 1 blocked/data-c
             "next_commands": {
                 "now": ".venv/bin/python -m cli.lance --tickers IBM,MU",
                 "watch": ".venv/bin/python -m cli.lance_full_cycle --tickers IBM,MU --watch 30",
+                "explain": ".venv/bin/python -m cli.lance_explain <TICKER> --payload data/live_sessions/latest_command_center.json",
             },
             "handoff_prompt": "Preserve data-quality caveats.",
         },
@@ -203,6 +205,7 @@ def test_lance_live_prints_operator_console_and_writes_handoff(monkeypatch, tmp_
     assert "Next Actions" in result.stdout
     assert "now=.venv/bin/python -m cli.lance --tickers IBM,MU" in result.stdout
     assert "watch=.venv/bin/python -m cli.lance_full_cycle --tickers IBM,MU --watch 30" in result.stdout
+    assert "explain=.venv/bin/python -m cli.lance_explain <TICKER>" in result.stdout
     assert "Agent Handoff" in result.stdout
     assert "Handoff written:" in result.stdout
     assert "JSON written:" in result.stdout

@@ -1100,6 +1100,33 @@ def test_run_lance_command_center_tool_with_injected_service():
     assert out["single_run_read"]["one_liner"] == "1 active monitor."
 
 
+def test_explain_lance_ticker_tool_with_injected_service():
+    class FakeTickerExplainService:
+        def explain(self, **kwargs):
+            assert kwargs["ticker"] == "IBM"
+            assert kwargs["payload"] == {"mode": "command_center"}
+            assert kwargs["payload_path"] == "data/live_sessions/latest_command_center.json"
+            return {
+                "agent_name": "lance_full_cycle",
+                "mode": "ticker_explain",
+                "ticker": "IBM",
+                "status": "FOUND",
+                "summary": "IBM is in Lance output.",
+                "disclaimer": "Matches your filter - not buy/sell advice. Verify before acting.",
+            }
+
+    out = tools.explain_lance_ticker(
+        ticker="IBM",
+        payload={"mode": "command_center"},
+        payload_path="data/live_sessions/latest_command_center.json",
+        service=FakeTickerExplainService(),
+    )
+
+    assert out["mode"] == "ticker_explain"
+    assert out["ticker"] == "IBM"
+    assert out["status"] == "FOUND"
+
+
 def test_run_lance_data_doctor_tool_with_injected_service():
     class FakeDataDoctorService:
         def diagnose(self, **kwargs):
@@ -1139,6 +1166,7 @@ def test_tool_definitions_are_well_formed():
         "run_lance_full_cycle",
         "track_lance_session_changes",
         "run_lance_command_center",
+        "explain_lance_ticker",
         "run_lance_data_doctor",
         "review_lance_full_cycle",
         "journal_lance_full_cycle_outcome",

@@ -95,6 +95,7 @@ def _payload() -> dict:
         "workflow_commands": {
             "now": ".venv/bin/python -m cli.lance --tickers IBM,MU",
             "watch": ".venv/bin/python -m cli.lance_full_cycle --tickers IBM,MU --watch 30",
+            "explain": ".venv/bin/python -m cli.lance_explain <TICKER> --payload data/live_sessions/latest_command_center.json",
             "tomorrow": ".venv/bin/python -m cli.lance_dashboard tomorrow --intraday-session-id 2026-07-03-lance-intraday --swing-session-id 2026-07-03-lance-swing",
         },
         "selection_audit": {
@@ -186,6 +187,7 @@ def _payload() -> dict:
             "next_commands": {
                 "now": ".venv/bin/python -m cli.lance --tickers IBM,MU",
                 "watch": ".venv/bin/python -m cli.lance_full_cycle --tickers IBM,MU --watch 30",
+                "explain": ".venv/bin/python -m cli.lance_explain <TICKER> --payload data/live_sessions/latest_command_center.json",
             },
             "handoff_prompt": "Use this block to brief another agent.",
         },
@@ -239,6 +241,7 @@ def test_lance_cli_prints_command_center(monkeypatch):
     assert "journal_lance_full_cycle_outcome lane=intraday ticker=IBM" in result.stdout
     assert "Tomorrow Prep" in result.stdout
     assert "fresh_scan_required=True" in result.stdout
+    assert "explain=.venv/bin/python -m cli.lance_explain <TICKER>" in result.stdout
     assert "Agent Handoff" in result.stdout
     assert "summary=1 active monitor, 1 swing watch" in result.stdout
     assert "blocked_data_quality=AAOI" in result.stdout

@@ -46,7 +46,9 @@ def selection_audit_lines(payload: dict[str, Any]) -> list[str]:
     for row in omitted:
         if not isinstance(row, dict):
             continue
-        lines.append(f"omitted {_value(row.get('ticker'))}: {_value(row.get('reason'))}")
+        stage = row.get("stage")
+        stage_label = f" [{_value(stage)}]" if stage else ""
+        lines.append(f"omitted {_value(row.get('ticker'))}{stage_label}: {_value(row.get('reason'))}")
     return lines
 
 
