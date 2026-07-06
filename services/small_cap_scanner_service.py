@@ -61,10 +61,16 @@ class SmallCapScannerService:
         market_limit: int | None = None,
         max_workers: int | None = None,
         include_rejected: bool = False,
+        live_intraday: bool = False,
     ) -> SmallCapScanOutput:
         preset = self.preset_service.get_preset(preset_name)
         run_ids: list[str] = []
         notes = list(preset.notes)
+        if live_intraday:
+            notes.append(
+                "Live intraday discovery mode: missing market cap, volume, and RVOL can pass prefilters; "
+                "rows stay caveated until enrichment confirms them."
+            )
         candidates_by_ticker: dict[str, SmallCapCandidate] = {}
         rejected_by_ticker: dict[str, SmallCapCandidate] = {}
         selection_resolved = False
@@ -94,9 +100,10 @@ class SmallCapScannerService:
             max_market_cap=max_market_cap,
             min_gap_abs=preset.min_gap_abs,
             direction=preset.direction,
-            min_volume=preset.min_volume,
-            min_rel_volume=preset.min_rel_volume,
-            include_low_confidence=preset.include_low_confidence,
+            min_volume=None if live_intraday else preset.min_volume,
+            min_rel_volume=None if live_intraday else preset.min_rel_volume,
+            include_low_confidence=True if live_intraday else preset.include_low_confidence,
+            allow_missing_filter_fields=live_intraday,
         )
         scan_run = self.scanner_service.scan(
             universe=universe,
@@ -117,6 +124,7 @@ class SmallCapScannerService:
             candidate = grade_small_cap_candidate(
                 result,
                 missing_fields=list(preset.missing_fields),
+                live_intraday=live_intraday,
             )
             if candidate.grade == "REJECT":
                 # Keep only the highest-scored reject per ticker (matches the
@@ -266,6 +274,7 @@ def grade_small_cap_candidate(
     result: ScannerResult,
     *,
     missing_fields: list[str],
+    live_intraday: bool = False,
 ) -> SmallCapCandidate:
     score = 0
     matched: list[str] = []
@@ -358,6 +367,13 @@ def grade_small_cap_candidate(
         has_absolute_volume_floor = True
     else:
         risk_notes.append("Volume is below the preferred small-cap scanner floor or unknown.")
+
+    if live_intraday and score < 35 and result.gap_pct is not None and result.gap_pct >= 5:
+        score = 35
+        matched.append("live_intraday_discovery")
+        risk_notes.append(
+            "Live intraday discovery mode: context row only until market cap, RVOL, volume, float, and catalyst are enriched."
+        )
 
     if result.confidence == "OK":
         score += 10

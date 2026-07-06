@@ -127,6 +127,7 @@ class ScanFilters:
     min_volume: float | None = None
     min_rel_volume: float | None = None
     include_low_confidence: bool = True
+    allow_missing_filter_fields: bool = False
 
 
 @dataclass
@@ -171,6 +172,7 @@ def make_scan_filters(
     min_volume: float | None = None,
     min_rel_volume: float | None = None,
     include_low_confidence: bool = True,
+    allow_missing_filter_fields: bool = False,
 ) -> ScanFilters:
     """Build ScanFilters, expanding a cap tier into market-cap bounds.
 
@@ -190,6 +192,7 @@ def make_scan_filters(
         min_volume=min_volume,
         min_rel_volume=min_rel_volume,
         include_low_confidence=include_low_confidence,
+        allow_missing_filter_fields=allow_missing_filter_fields,
     )
 
 

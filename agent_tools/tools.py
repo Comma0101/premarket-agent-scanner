@@ -230,6 +230,7 @@ def scan_small_caps(
     market_limit: int | None = None,
     max_workers: int | None = None,
     include_rejected: bool = False,
+    live_intraday: bool = False,
     service: Any | None = None,
 ) -> dict[str, Any]:
     """Run the small-cap scanner and return JSON-safe candidates."""
@@ -255,6 +256,7 @@ def scan_small_caps(
             market_limit=market_limit,
             max_workers=max_workers,
             include_rejected=include_rejected,
+            live_intraday=live_intraday,
         )
     except KeyError as exc:
         return {"error": str(exc)}

@@ -44,6 +44,14 @@ def main(
             "see why nothing qualified. Off by default."
         ),
     ),
+    live_intraday: bool = typer.Option(
+        False,
+        "--live-intraday",
+        help=(
+            "Live discovery mode: keep price movers when market cap, volume, or RVOL "
+            "need enrichment; rows remain caveated."
+        ),
+    ),
     all_universes: bool = typer.Option(False, "--all", help="Scan every defined universe."),
 ) -> None:
     if not any([universe, watchlist, tickers, market, all_universes]):
@@ -62,6 +70,7 @@ def main(
             max_workers=max_workers,
             all_universes=all_universes,
             include_rejected=include_rejected,
+            live_intraday=live_intraday,
         )
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc

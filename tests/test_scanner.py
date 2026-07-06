@@ -267,6 +267,27 @@ def test_min_volume_filter_excludes_thin_names():
     assert [r.ticker for r in out.results] == ["LIQ"]
 
 
+def test_allow_missing_filter_fields_keeps_live_discovery_rows_but_not_known_failures():
+    quotes = {
+        "UNKNOWN": _quote("UNKNOWN", prev=10.0, pre=11.0, cap=None, vol=None, avg_vol=None),
+        "LARGE": _quote("LARGE", prev=10.0, pre=11.0, cap=5.0e9, vol=None, avg_vol=None),
+    }
+    filters = ScanFilters(
+        max_market_cap=2.0e9,
+        min_gap_abs=5.0,
+        min_volume=500_000,
+        min_rel_volume=2.0,
+        direction="up",
+        include_low_confidence=True,
+        allow_missing_filter_fields=True,
+    )
+
+    out = _service(quotes).scan(tickers="UNKNOWN,LARGE", filters=filters)
+
+    assert [r.ticker for r in out.results] == ["UNKNOWN"]
+    assert out.results[0].confidence == "MISSING_MARKET_CAP"
+
+
 def test_gap_dollar_persisted_to_db(tmp_path):
     from app.db import get_connection
 

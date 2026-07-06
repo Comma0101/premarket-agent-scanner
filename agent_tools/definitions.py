@@ -153,6 +153,14 @@ TOOLS: list[dict[str, Any]] = [
                         "Use this to surface why nothing made the A/B/C buckets."
                     ),
                 },
+                "live_intraday": {
+                    "type": "boolean",
+                    "description": (
+                        "Opt-in live discovery mode for regular-session small/spec movers. "
+                        "Keeps rows when market cap, volume, or RVOL need enrichment; "
+                        "do not treat those rows as confirmed Sykes candidates."
+                    ),
+                },
                 "all_universes": {
                     "type": "boolean",
                     "description": "Scan every defined universe. Defaults to false.",

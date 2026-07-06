@@ -46,6 +46,7 @@ class TradingAgentOrchestrator:
         max_workers: int | None = None,
         all_universes: bool = False,
         include_rejected: bool = False,
+        live_intraday: bool = False,
         user_query: str | None = None,
         db_path: str | None = None,
     ) -> AgentRunPacket:
@@ -68,6 +69,8 @@ class TradingAgentOrchestrator:
             tool_input["max_workers"] = max_workers
         if include_rejected:
             tool_input["include_rejected"] = True
+        if live_intraday:
+            tool_input["live_intraday"] = True
         result = self.dispatcher(
             "scan_small_caps",
             tool_input,

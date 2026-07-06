@@ -137,6 +137,36 @@ def test_orchestrator_calls_small_cap_tool_and_buckets_candidates():
     assert "Use only the scanner packet" in as_dict["handoff_prompt"]
 
 
+def test_orchestrator_passes_live_intraday_to_small_cap_tool():
+    calls = []
+
+    def fake_dispatch(name, tool_input, *, user_query=None, db_path=None):
+        calls.append((name, tool_input))
+        return {
+            "preset": "sykes_small_cap_v0",
+            "run_ids": ["run-1"],
+            "candidate_count": 0,
+            "candidates": [],
+            "notes": [],
+        }
+
+    TradingAgentOrchestrator(dispatcher=fake_dispatch).run_sykes_small_cap_watchlist(
+        tickers="HOT",
+        live_intraday=True,
+    )
+
+    assert calls == [
+        (
+            "scan_small_caps",
+            {
+                "preset_name": "sykes_small_cap_v0",
+                "tickers": "HOT",
+                "live_intraday": True,
+            },
+        )
+    ]
+
+
 def test_orchestrator_can_run_market_scan():
     calls = []
 

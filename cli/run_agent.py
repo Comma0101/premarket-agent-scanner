@@ -35,6 +35,11 @@ def main(
         "--include-rejected",
         help="Include rejected candidates (score=0, grade=REJECT) in the watchlist packet.",
     ),
+    live_intraday: bool = typer.Option(
+        False,
+        "--live-intraday",
+        help="Opt-in regular-session discovery mode for small/spec movers that need enrichment.",
+    ),
     all_universes: bool = typer.Option(False, "--all", help="Scan every defined universe."),
     preset_name: str = typer.Option(
         "sykes_small_cap_v0",
@@ -58,6 +63,7 @@ def main(
         "max_workers": max_workers,
         "all_universes": all_universes,
         "include_rejected": include_rejected,
+        "live_intraday": live_intraday,
         "user_query": "run sykes-style small-cap watchlist agent",
     }
     packet = _run_agent_packet(json_output=json_output, **kwargs)

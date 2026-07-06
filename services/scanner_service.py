@@ -291,10 +291,16 @@ class ScannerService:
 
         # Market-cap filters. A missing cap only excludes when a bound is set.
         if filters.min_market_cap:
-            if result.market_cap is None or result.market_cap < filters.min_market_cap:
+            if result.market_cap is None:
+                if not filters.allow_missing_filter_fields:
+                    return False
+            elif result.market_cap < filters.min_market_cap:
                 return False
         if filters.max_market_cap is not None:
-            if result.market_cap is None or result.market_cap > filters.max_market_cap:
+            if result.market_cap is None:
+                if not filters.allow_missing_filter_fields:
+                    return False
+            elif result.market_cap > filters.max_market_cap:
                 return False
 
         if result.gap_pct is None:
@@ -308,10 +314,16 @@ class ScannerService:
 
         # Volume filters. A missing value only excludes when the bound is set.
         if filters.min_volume:
-            if result.volume is None or result.volume < filters.min_volume:
+            if result.volume is None:
+                if not filters.allow_missing_filter_fields:
+                    return False
+            elif result.volume < filters.min_volume:
                 return False
         if filters.min_rel_volume:
-            if result.rel_volume is None or result.rel_volume < filters.min_rel_volume:
+            if result.rel_volume is None:
+                if not filters.allow_missing_filter_fields:
+                    return False
+            elif result.rel_volume < filters.min_rel_volume:
                 return False
 
         return True

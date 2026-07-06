@@ -210,6 +210,29 @@ def test_scan_small_caps_tool_accepts_market_selection():
     assert out["notes"] == ["market universe us-listed"]
 
 
+def test_scan_small_caps_tool_accepts_live_intraday():
+    from app.models import SmallCapScanOutput
+
+    class FakeSmallCapService:
+        def scan(self, **kwargs):
+            assert kwargs["live_intraday"] is True
+            return SmallCapScanOutput(
+                preset=kwargs["preset_name"],
+                run_ids=[],
+                candidate_count=0,
+                candidates=[],
+                notes=["live intraday"],
+            )
+
+    out = tools.scan_small_caps(
+        tickers="HOT",
+        live_intraday=True,
+        service=FakeSmallCapService(),
+    )
+
+    assert out["notes"] == ["live intraday"]
+
+
 def test_list_universes_tool_shape():
     out = tools.list_universes(service=UniverseService())
     assert "MAG7" in out["universes"]
