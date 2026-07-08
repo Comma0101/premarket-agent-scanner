@@ -12,6 +12,7 @@ data/*.sqlite
 data/*.sqlite-*
 data/live_sessions/
 exports/
+.gitnexus/
 .omc/
 config/mcporter.json
 
