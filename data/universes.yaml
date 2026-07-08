@@ -112,3 +112,40 @@ THEME_ETFS_MACRO:
   - VIX
   - YANG
   - BULL
+MID_LARGE_CAP:
+  - AAPL
+  - MSFT
+  - GOOGL
+  - GOOG
+  - AMZN
+  - NVDA
+  - META
+  - TSLA
+  - AVGO
+  - AMD
+  - NFLX
+  - MRVL
+  - ARM
+  - MU
+  - QCOM
+  - TSM
+  - AMAT
+  - LRCX
+  - KLAC
+  - DELL
+  - SMCI
+  - ORCL
+  - UBER
+  - HOOD
+  - COST
+  - WMT
+  - MCD
+  - LLY
+  - V
+  - ADBE
+  - NOW
+  - SNOW
+  - CRWD
+  - PANW
+  - IBM
+  - INTC

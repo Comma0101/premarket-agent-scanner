@@ -170,6 +170,27 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "scan_breitstein",
+        "description": (
+            "Run the Lance Breitstein phase-1 scan over a selected universe, "
+            "watchlist, explicit tickers, or market source."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "preset_name": {"type": "string"},
+                "universe": {"type": "string"},
+                "watchlist": {"type": "string"},
+                "tickers": {"type": "string"},
+                "all_universes": {"type": "boolean"},
+                "market": {"type": "string", "enum": ["us-listed"]},
+                "market_limit": {"type": "integer", "minimum": 0},
+                "max_workers": {"type": "integer", "minimum": 1},
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "run_trading_desk",
         "description": (
             "Run the one-call trading desk brief. Composes Lance large/mid-cap "
@@ -1574,6 +1595,7 @@ TOOLS: list[dict[str, Any]] = [
 _DISPATCH: dict[str, Callable[..., dict[str, Any]]] = {
     "scan_premarket": tools.scan_premarket,
     "scan_small_caps": tools.scan_small_caps,
+    "scan_breitstein": tools.scan_breitstein,
     "list_universes": tools.list_universes,
     "get_ticker_snapshot": tools.get_ticker_snapshot,
     "scan_breitstein_intraday": tools.scan_breitstein_intraday,

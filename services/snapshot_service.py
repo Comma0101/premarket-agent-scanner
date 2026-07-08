@@ -69,28 +69,14 @@ class SnapshotService:
                     error=str(exc),
                 )
 
-        halt_status = self._get_halt_status(normalized)
-        return self._combine(normalized, yf_data, alpaca_data, halt_status)
-
-    def _get_halt_status(self, ticker: str) -> HaltStatus | None:
-        if self.halt_provider is None:
-            return None
-        try:
-            return self.halt_provider.get_halt_status(ticker)
-        except Exception as exc:
-            return HaltStatus(
-                ticker=ticker,
-                status="UNKNOWN",
-                error=str(exc),
-                notes=["NASDAQ halt feed lookup raised an exception."],
-            )
+        return self._combine(normalized, yf_data, alpaca_data, self._halt_status(normalized))
 
     def _combine(
         self,
         ticker: str,
         yf_data: ProviderPriceData,
         alpaca_data: ProviderPriceData | None,
-        halt_status: HaltStatus | None = None,
+        halt_status: HaltStatus | None,
     ) -> CombinedSnapshot:
         sources: list[str] = []
         notes: list[str] = []
@@ -110,8 +96,7 @@ class SnapshotService:
 
         if yf_data.error:
             notes.append(f"yfinance: {yf_data.error}")
-            if yf_data.error != "missing_credentials":
-                provider_failures[yf_data.source] = yf_data.error
+            provider_failures[yf_data.source] = yf_data.error
         else:
             sources.append(yf_data.source)
         notes.extend(yf_data.notes)
@@ -126,9 +111,21 @@ class SnapshotService:
             latest_price = latest_price if latest_price is not None else alpaca_data.latest_price
             volume = volume if volume is not None else alpaca_data.volume
             timestamp = timestamp or alpaca_data.timestamp
-        elif alpaca_data is not None and alpaca_data.error not in {None, "missing_credentials"}:
+        elif alpaca_data is not None and alpaca_data.error is not None:
+            # Surface every errored Alpaca response in provider_failures (including
+            # ``missing_credentials`` — the desk needs to know Alpaca did not
+            # contribute, even when the reason is "no keys configured"). The
+            # divergence note is still skipped for missing_credentials so the
+            # existing fall-back-to-yfinance tests keep passing.
             notes.append(f"alpaca: {alpaca_data.error}")
             provider_failures[alpaca_data.source] = alpaca_data.error
+
+        if halt_status is not None:
+            if halt_status.error:
+                notes.append(f"nasdaq_halts: {halt_status.error}")
+            elif halt_status.is_active:
+                code = f" ({halt_status.reason_code})" if halt_status.reason_code else ""
+                notes.append(f"nasdaq_halts: active halt{code}.")
 
         confidence = self._assign_confidence(
             previous_close=previous_close,
@@ -138,6 +135,13 @@ class SnapshotService:
             yf_data=yf_data,
             alpaca_data=alpaca_data if alpaca_usable else None,
             notes=notes,
+        )
+
+        data_status = self._assign_data_status(
+            sources=sources,
+            provider_failures=provider_failures,
+            alpaca_configured=alpaca_data is not None,
+            confidence=confidence,
         )
 
         snapshot = CombinedSnapshot(
@@ -153,23 +157,68 @@ class SnapshotService:
             source_primary=sources[0] if sources else None,
             source_secondary=sources[1] if len(sources) > 1 else None,
             confidence=confidence,
-            data_status=_assign_data_status(
-                confidence=confidence,
-                sources=sources,
-                provider_failures=provider_failures,
-            ),
-            provider_failures=provider_failures,
-            halt_status=halt_status,
             sources=sources,
             notes=notes,
             raw_yfinance_json=json.dumps(yf_data.raw) if yf_data.raw else None,
             raw_alpaca_json=json.dumps(alpaca_data.raw) if alpaca_usable and alpaca_data.raw else None,
             yfinance_data=yf_data,
             alpaca_data=alpaca_data,
+            provider_failures=provider_failures,
+            data_status=data_status,
+            halt_status=halt_status,
         )
         snapshot.market_cap = market_cap
         snapshot.average_volume = average_volume
         return snapshot
+
+    def _halt_status(self, ticker: str) -> HaltStatus | None:
+        if self.halt_provider is None:
+            return None
+        try:
+            return self.halt_provider.get_halt_status(ticker)
+        except Exception as exc:
+            return HaltStatus(
+                ticker=ticker,
+                status="UNKNOWN",
+                is_active=False,
+                source=getattr(self.halt_provider, "source_name", "nasdaq_trader_halts"),
+                fetched_at=utc_now_iso(),
+                error=str(exc),
+            )
+
+    @staticmethod
+    def _assign_data_status(
+        *,
+        sources: list[str],
+        provider_failures: dict[str, str],
+        alpaca_configured: bool,
+        confidence: str,
+    ) -> str:
+        """Top-level pipeline summary used by the desk for at-a-glance triage.
+
+        Order of precedence:
+          1. No providers contributed and none were configured -> ``no_providers``.
+          2. Every configured provider errored -> ``provider_failure``.
+          3. Any provider errored, missing field, low/conflict confidence
+             -> ``partial``.
+          4. Stale data -> ``stale``.
+          5. Otherwise -> ``live``.
+        """
+        if not sources and not provider_failures and not alpaca_configured:
+            return "no_providers"
+        if provider_failures and not sources:
+            return "provider_failure"
+        if provider_failures or confidence in {
+            "MISSING_PREMARKET_PRICE",
+            "MISSING_PREVIOUS_CLOSE",
+            "MISSING_MARKET_CAP",
+            "LOW_CONFIDENCE",
+            "CONFLICT",
+        }:
+            return "partial"
+        if confidence == "STALE_DATA":
+            return "stale"
+        return "live"
 
     def _assign_confidence(
         self,
@@ -250,20 +299,3 @@ def _num(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number
-
-
-def _assign_data_status(
-    *,
-    confidence: str,
-    sources: list[str],
-    provider_failures: dict[str, str],
-) -> str:
-    if provider_failures:
-        return "provider_failure"
-    if not sources:
-        return "no_providers"
-    if confidence == "STALE_DATA":
-        return "stale"
-    if confidence == "OK":
-        return "live"
-    return "partial"

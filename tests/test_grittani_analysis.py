@@ -1,86 +1,225 @@
+from __future__ import annotations
+
+import pytest
+
 from app.models import IntradayBar, IntradayBarSeries
 from services.grittani_analysis_service import GrittaniAnalysisService
 
 
-class MockProvider:
-    def __init__(self, intraday_bars: list[IntradayBar], daily_bars: list[IntradayBar]):
-        self.intraday_bars = intraday_bars
-        self.daily_bars = daily_bars
+class FakeBarProvider:
+    source_name = "fake-bars"
 
-    def get_bars(self, ticker: str, timeframe: str, limit: int = 15) -> IntradayBarSeries:
-        if timeframe == "1Day":
-            return IntradayBarSeries(ticker, timeframe, self.daily_bars, "mock", "now")
-        return IntradayBarSeries(ticker, timeframe, self.intraday_bars, "mock", "now")
+    def __init__(
+        self,
+        *,
+        daily_bars: list[IntradayBar] | None = None,
+        intraday_bars: list[IntradayBar] | None = None,
+        raises_on: str | None = None,
+    ) -> None:
+        self.daily_bars = daily_bars or []
+        self.intraday_bars = intraday_bars or []
+        self.raises_on = raises_on
+
+    def get_bars(
+        self,
+        ticker: str,
+        timeframe: str = "2Min",
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 100,
+    ) -> IntradayBarSeries:
+        if self.raises_on == timeframe:
+            raise RuntimeError(f"{timeframe} unavailable")
+        bars = self.daily_bars if timeframe == "1Day" else self.intraday_bars
+        return IntradayBarSeries(
+            ticker=ticker,
+            timeframe=timeframe,
+            bars=bars,
+            source=self.source_name,
+            fetched_at="2026-06-29T14:10:00Z",
+        )
 
 
-def _make_bar(ts: str, o: float, h: float, low_val: float, c: float) -> IntradayBar:
-    return IntradayBar("TEST", ts, o, h, low_val, c, 1000)
+def _bar(
+    *,
+    ticker: str = "TEST",
+    timestamp: str,
+    open_price: float,
+    high: float,
+    low: float,
+    close: float,
+    volume: float = 1000,
+    timeframe: str = "2Min",
+) -> IntradayBar:
+    return IntradayBar(
+        ticker=ticker,
+        timestamp=timestamp,
+        open=open_price,
+        high=high,
+        low=low,
+        close=close,
+        volume=volume,
+        timeframe=timeframe,
+    )
 
 
-def test_grittani_panic_trigger():
-    # 1. Daily bars (15 days). Start at 5.0, end at 15.0 (200% run-up)
-    daily = [
-        _make_bar("day1", 5.0, 5.0, 5.0, 5.0),
-        _make_bar("day14", 15.0, 15.0, 15.0, 15.0),
-        _make_bar("day15_incomplete", 15.0, 15.0, 15.0, 15.0),  # today's incomplete daily bar
+def _daily_runup() -> list[IntradayBar]:
+    return [
+        _bar(
+            timestamp="2026-06-24T20:00:00Z",
+            open_price=5.0,
+            high=5.5,
+            low=4.8,
+            close=5.0,
+            timeframe="1Day",
+        ),
+        _bar(
+            timestamp="2026-06-25T20:00:00Z",
+            open_price=14.5,
+            high=15.5,
+            low=14.0,
+            close=15.0,
+            timeframe="1Day",
+        ),
     ]
-    
-    # 2. Intraday bars (09:30 to 09:40 NY time)
-    # NY Time is UTC-4 during EDT (let's just use 13:30Z for 09:30 NY)
-    intraday = [
-        # Spikes to 20.0
-        _make_bar("2026-06-25T13:30:00Z", 15.0, 20.0, 15.0, 19.0),
-        # Crashes to 12.0 (Drop from 20.0 to 12.0 is 40%)
-        _make_bar("2026-06-25T13:35:00Z", 19.0, 19.0, 12.0, 12.5),
-        # First green confirmation bar (close > open)
-        _make_bar("2026-06-25T13:40:00Z", 12.5, 13.5, 12.0, 13.0),
+
+
+def _valid_intraday() -> list[IntradayBar]:
+    return [
+        _bar(
+            timestamp="2026-06-29T13:30:00Z",
+            open_price=15.0,
+            high=20.0,
+            low=15.0,
+            close=19.0,
+        ),
+        _bar(
+            timestamp="2026-06-29T13:34:00Z",
+            open_price=19.0,
+            high=19.0,
+            low=12.0,
+            close=12.4,
+        ),
+        _bar(
+            timestamp="2026-06-29T13:38:00Z",
+            open_price=12.4,
+            high=13.4,
+            low=12.1,
+            close=13.0,
+        ),
     ]
-    
-    provider = MockProvider(intraday, daily)
-    svc = GrittaniAnalysisService(provider)
-    
-    signal = svc.detect_morning_panic("TEST")
-    
+
+
+def test_detect_morning_panic_valid_signal_carries_reference_data():
+    service = GrittaniAnalysisService(
+        FakeBarProvider(daily_bars=_daily_runup(), intraday_bars=_valid_intraday())
+    )
+
+    signal = service.detect_morning_panic("TEST", rvol=5.5)
+
     assert signal is not None
-    assert signal.multi_day_run_pct == 200.0  # (15 - 5) / 5
-    assert signal.intraday_drop_pct == 40.0   # (20 - 12) / 20
-    assert signal.entry_price == 13.0
-    assert signal.stop_price == 12.0
+    assert signal.ticker == "TEST"
+    assert signal.multi_day_run_pct == 200.0
+    assert signal.intraday_drop_pct == 40.0
+    assert signal.panic_high == 20.0
+    assert signal.panic_low == 12.0
+    assert signal.bounce_reference_price == 13.0
+    assert signal.risk_reference_price == 12.0
+    assert signal.prior_day_close == 15.0
+    assert signal.vwap is not None
+    assert signal.rvol == 5.5
+    assert signal.source == "fake-bars"
+    assert signal.fetched_at == "2026-06-29T14:10:00Z"
+    assert signal.confidence == "OK"
+    assert signal.missing_fields == []
+    assert signal.notes
 
 
-def test_grittani_panic_no_runup():
-    # Start 10.0, End 11.0 (10% run)
-    daily = [
-        _make_bar("day1", 10.0, 10.0, 10.0, 10.0),
-        _make_bar("day14", 11.0, 11.0, 11.0, 11.0),
-        _make_bar("day15", 11.0, 11.0, 11.0, 11.0),
-    ]
-    intraday = [
-        _make_bar("2026-06-25T13:30:00Z", 15.0, 20.0, 15.0, 19.0),
-        _make_bar("2026-06-25T13:35:00Z", 19.0, 19.0, 12.0, 12.5),
-        _make_bar("2026-06-25T13:40:00Z", 12.5, 13.5, 12.0, 13.0),
-    ]
-    
-    provider = MockProvider(intraday, daily)
-    svc = GrittaniAnalysisService(provider)
-    signal = svc.detect_morning_panic("TEST")
-    assert signal is None
+@pytest.mark.parametrize("rvol", [None, 4.99])
+def test_detect_morning_panic_requires_service_level_rvol_gate(
+    rvol: float | None,
+) -> None:
+    service = GrittaniAnalysisService(
+        FakeBarProvider(daily_bars=_daily_runup(), intraday_bars=_valid_intraday())
+    )
+
+    assert service.detect_morning_panic("TEST", rvol=rvol) is None
 
 
-def test_grittani_panic_small_drop():
-    daily = [
-        _make_bar("day1", 5.0, 5.0, 5.0, 5.0),
-        _make_bar("day14", 15.0, 15.0, 15.0, 15.0),
-        _make_bar("day15", 15.0, 15.0, 15.0, 15.0),
+def test_detect_morning_panic_rejects_invalid_timestamp() -> None:
+    bars = _valid_intraday()
+    bars[-1].timestamp = "not-a-timestamp"
+    service = GrittaniAnalysisService(
+        FakeBarProvider(daily_bars=_daily_runup(), intraday_bars=bars)
+    )
+
+    assert service.detect_morning_panic("TEST", rvol=6.0) is None
+
+
+def test_detect_morning_panic_rejects_outside_morning_window() -> None:
+    bars = [
+        _bar(
+            timestamp="2026-06-29T15:00:00Z",
+            open_price=15.0,
+            high=20.0,
+            low=15.0,
+            close=19.0,
+        ),
+        _bar(
+            timestamp="2026-06-29T15:04:00Z",
+            open_price=19.0,
+            high=19.0,
+            low=12.0,
+            close=12.4,
+        ),
+        _bar(
+            timestamp="2026-06-29T15:08:00Z",
+            open_price=12.4,
+            high=13.4,
+            low=12.1,
+            close=13.0,
+        ),
     ]
-    # Drop from 20 to 16 is only 20%
-    intraday = [
-        _make_bar("2026-06-25T13:30:00Z", 15.0, 20.0, 15.0, 19.0),
-        _make_bar("2026-06-25T13:35:00Z", 19.0, 19.0, 16.0, 16.5),
-        _make_bar("2026-06-25T13:40:00Z", 16.5, 17.5, 16.0, 17.0),
-    ]
-    
-    provider = MockProvider(intraday, daily)
-    svc = GrittaniAnalysisService(provider)
-    signal = svc.detect_morning_panic("TEST")
-    assert signal is None
+    service = GrittaniAnalysisService(
+        FakeBarProvider(daily_bars=_daily_runup(), intraday_bars=bars)
+    )
+
+    assert service.detect_morning_panic("TEST", rvol=6.0) is None
+
+
+def test_detect_morning_panic_rejects_red_confirmation_bar() -> None:
+    bars = _valid_intraday()
+    bars[-1] = _bar(
+        timestamp=bars[-1].timestamp,
+        open_price=13.2,
+        high=13.4,
+        low=12.1,
+        close=12.8,
+    )
+    service = GrittaniAnalysisService(
+        FakeBarProvider(daily_bars=_daily_runup(), intraday_bars=bars)
+    )
+
+    assert service.detect_morning_panic("TEST", rvol=6.0) is None
+
+
+def test_detect_morning_panic_rejects_empty_bar_sets() -> None:
+    assert (
+        GrittaniAnalysisService(FakeBarProvider(intraday_bars=_valid_intraday()))
+        .detect_morning_panic("TEST", rvol=6.0)
+        is None
+    )
+    assert (
+        GrittaniAnalysisService(FakeBarProvider(daily_bars=_daily_runup()))
+        .detect_morning_panic("TEST", rvol=6.0)
+        is None
+    )
+
+
+def test_detect_morning_panic_surfaces_provider_exceptions() -> None:
+    service = GrittaniAnalysisService(
+        FakeBarProvider(daily_bars=_daily_runup(), raises_on="2Min")
+    )
+
+    with pytest.raises(RuntimeError, match="2Min unavailable"):
+        service.detect_morning_panic("TEST", rvol=6.0)

@@ -53,8 +53,18 @@ class YFinanceProvider:
 
         try:
             yf_ticker = yf.Ticker(normalized)
-            info = self._load_info(yf_ticker)
-            fast_info = getattr(yf_ticker, "fast_info", {}) or {}
+            notes: list[str] = []
+            try:
+                info = self._load_info(yf_ticker)
+            except Exception as exc:
+                info = {}
+                notes.append(f"yfinance get_info failed; using fast_info fallback: {exc}")
+
+            try:
+                fast_info = getattr(yf_ticker, "fast_info", {}) or {}
+            except Exception as exc:
+                fast_info = {}
+                notes.append(f"yfinance fast_info failed: {exc}")
 
             previous_close = (
                 _num(info.get("previousClose"))
@@ -82,18 +92,30 @@ class YFinanceProvider:
                 "regularMarketPrice": latest_price,
                 "regularMarketTime": info.get("regularMarketTime"),
                 "preMarketTime": info.get("preMarketTime"),
-                "marketCap": _num(info.get("marketCap")),
-                "volume": _num(info.get("volume")),
+                "marketCap": _num(info.get("marketCap"))
+                or _num(_safe_get(fast_info, "market_cap")),
+                "volume": _num(info.get("volume")) or _num(_safe_get(fast_info, "last_volume")),
                 "averageVolume": (
                     _num(info.get("averageVolume"))
                     or _num(info.get("averageDailyVolume10Day"))
                     or _num(info.get("averageVolume10days"))
+                    or _num(_safe_get(fast_info, "ten_day_average_volume"))
+                    or _num(_safe_get(fast_info, "three_month_average_volume"))
                 ),
             }
 
-            notes: list[str] = []
             if premarket_price is not None and timestamp is None:
                 notes.append("yfinance returned premarket price without timestamp.")
+
+            if not any([previous_close, premarket_price, latest_price, raw["marketCap"]]):
+                error = "; ".join(notes) or "yfinance returned no quote data."
+                return ProviderPriceData(
+                    ticker=normalized,
+                    source=self.source_name,
+                    raw=raw,
+                    notes=notes,
+                    error=error,
+                )
 
             return ProviderPriceData(
                 ticker=normalized,
@@ -101,10 +123,15 @@ class YFinanceProvider:
                 previous_close=previous_close,
                 premarket_price=premarket_price,
                 latest_price=latest_price,
-                open_price=_num(info.get("regularMarketOpen")),
-                high=_num(info.get("regularMarketDayHigh")),
-                low=_num(info.get("regularMarketDayLow")),
-                volume=_num(info.get("volume")) or _num(info.get("regularMarketVolume")),
+                open_price=_num(info.get("regularMarketOpen"))
+                or _num(_safe_get(fast_info, "open")),
+                high=_num(info.get("regularMarketDayHigh"))
+                or _num(_safe_get(fast_info, "day_high")),
+                low=_num(info.get("regularMarketDayLow"))
+                or _num(_safe_get(fast_info, "day_low")),
+                volume=_num(info.get("volume"))
+                or _num(info.get("regularMarketVolume"))
+                or _num(_safe_get(fast_info, "last_volume")),
                 timestamp=timestamp,
                 raw=raw,
                 notes=notes,

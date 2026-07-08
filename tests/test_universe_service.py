@@ -7,9 +7,13 @@ def test_curated_ai_and_active_universes_include_requested_traders_list() -> Non
     universes = service.list_universes()
     watchlists = service.list_watchlists()
 
-    assert {"AI_SEMIS_MEMORY", "AI_INFRA_POWER", "SPECULATIVE_ACTIVE", "THEME_ETFS_MACRO"} <= set(
-        universes
-    )
+    assert {
+        "AI_SEMIS_MEMORY",
+        "AI_INFRA_POWER",
+        "SPECULATIVE_ACTIVE",
+        "THEME_ETFS_MACRO",
+        "MID_LARGE_CAP",
+    } <= set(universes)
     assert "HOT_ACTIVE" in watchlists
 
     hot_active = set(watchlists["HOT_ACTIVE"])
@@ -20,6 +24,9 @@ def test_curated_ai_and_active_universes_include_requested_traders_list() -> Non
     assert {"SMCI", "DELL", "CRWV", "CEG", "GEV", "OKLO"} <= set(universes["AI_INFRA_POWER"])
     assert {"PLTR", "COIN", "MSTR"} <= set(universes["SPECULATIVE_ACTIVE"])
     assert {"SPY", "QQQ", "TQQQ", "SMH", "DRAM"} <= set(universes["THEME_ETFS_MACRO"])
+    assert {"AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"} <= set(
+        universes["MID_LARGE_CAP"]
+    )
 
 
 def test_hot_active_watchlist_resolves_membership_without_market_data() -> None:

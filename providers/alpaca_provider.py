@@ -87,17 +87,21 @@ class AlpacaProvider:
 
         if latest_trade_price is None and latest_price is None:
             notes.append("Alpaca has no recent IEX print for this ticker.")
+
         error = None
-        if (
-            previous_close is None
-            and latest_trade_price is None
-            and latest_price is None
-            and open_price is None
-            and high is None
-            and low is None
-            and volume is None
+        if not any(
+            [
+                previous_close,
+                latest_trade_price,
+                latest_price,
+                open_price,
+                high,
+                low,
+                volume,
+                timestamp,
+            ]
         ):
-            error = "no_usable_alpaca_snapshot"
+            error = "; ".join(notes) or "Alpaca returned no snapshot data."
 
         return ProviderPriceData(
             ticker=normalized,
@@ -170,14 +174,12 @@ class AlpacaProvider:
             )
 
         now = datetime.now(timezone.utc)
+        default_start, default_end = _default_bar_window(timeframe, limit, now)
         if not start:
-            if timeframe == "1Day":
-                start_dt = now - timedelta(days=30)
-            else:
-                start_dt = now - timedelta(hours=4)
-            start = start_dt.isoformat()
+            start = default_start.isoformat()
         if not end:
-            end = now.isoformat()
+            end = default_end.isoformat()
+        sort = _bar_sort(timeframe)
 
         payload = self._request(
             f"/stocks/{ticker.upper()}/bars",
@@ -188,25 +190,32 @@ class AlpacaProvider:
                 "limit": limit,
                 "adjustment": "raw",
                 "feed": "iex",
-                "sort": "asc",
+                "sort": sort,
             },
         )
 
-        raw_bars = payload.get("bars", []) if isinstance(payload, dict) else []
+        raw_bars = payload.get("bars") if isinstance(payload, dict) else []
+        if not isinstance(raw_bars, list):
+            raw_bars = []
+        if sort == "desc":
+            raw_bars = list(reversed(raw_bars))
+
         bars = []
         for bar in raw_bars:
             if not isinstance(bar, dict):
                 continue
-            bars.append(IntradayBar(
-                ticker=ticker.upper(),
-                timestamp=_normalize_timestamp(bar.get("t")),
-                open=_num(bar.get("o")) or 0.0,
-                high=_num(bar.get("h")) or 0.0,
-                low=_num(bar.get("l")) or 0.0,
-                close=_num(bar.get("c")) or 0.0,
-                volume=_num(bar.get("v")) or 0.0,
-                timeframe=timeframe,
-            ))
+            bars.append(
+                IntradayBar(
+                    ticker=ticker.upper(),
+                    timestamp=_normalize_timestamp(bar.get("t")),
+                    open=_num(bar.get("o")) or 0.0,
+                    high=_num(bar.get("h")) or 0.0,
+                    low=_num(bar.get("l")) or 0.0,
+                    close=_num(bar.get("c")) or 0.0,
+                    volume=_num(bar.get("v")) or 0.0,
+                    timeframe=timeframe,
+                )
+            )
 
         return IntradayBarSeries(
             ticker=ticker.upper(),
@@ -257,3 +266,23 @@ def _normalize_timestamp(value: Any) -> str | None:
     if parsed is None:
         return None
     return parsed.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _default_bar_window(
+    timeframe: str,
+    limit: int,
+    now: datetime,
+) -> tuple[datetime, datetime]:
+    if _is_daily_timeframe(timeframe):
+        return now - timedelta(days=max(30, limit * 2)), now
+    return now - timedelta(hours=4), now
+
+
+def _bar_sort(timeframe: str) -> str:
+    if _is_daily_timeframe(timeframe):
+        return "desc"
+    return "asc"
+
+
+def _is_daily_timeframe(timeframe: str) -> bool:
+    return timeframe.strip().lower() in {"1day", "1d", "day"}

@@ -82,29 +82,6 @@ paid course content (Magnum Opus).
   (`EV-LB-016`)
 - Profile readiness: **directly scannable once 2-min bar data and VWAP exist**
 
-## Agent Behavior Layer
-
-The deeper distillation turns Lance from a scanner profile into an intraday
-co-pilot policy. The agent should not merely report that a ticker moved. It
-should answer, in order:
-
-1. Is the data usable now?
-2. Is the ticker truly in play?
-3. Is the move emotional/temporary or a possible fundamental repricing?
-4. Is the agent still looking at the front side of the move?
-5. What exact confirmation is missing?
-6. What invalidates the idea?
-7. What needs to be reviewed and journaled after the session?
-
-State labels should stay consistent across services and Desk output:
-`blocked_data_quality`, `not_in_play`, `watching`, `setup_forming`,
-`waiting_for_turn`, `triggered_reference`, `invalidated`, and `review_needed`.
-
-The source-backed reason for this policy is that the public strategy material
-emphasizes favorable-variable stacking, waiting for confirmation, avoiding slow
-trends/chop, using daily plus intraday context, and defining risk by structure.
-See `docs/research/lance_breitstein/agent_policy.md`.
-
 ### Consolidation Breakout (Secondary Setup)
 
 - Evidence: `EV-LB-013`
@@ -168,7 +145,7 @@ the method while honestly flagging the verification gaps.
 
 ## Profile Readiness
 
-Status: **agent-ready for bar-backed co-pilot mode when intraday provider data is available**
+Status: **agent-ready after 2-min bar data layer is built**
 
 Rationale:
 
@@ -177,9 +154,8 @@ Rationale:
 - Hard entry triggers (prior 2-min bar break), hard stops (prior bar low/high),
   VWAP filter, 2x volume rule, condition-stacking framework — all are specific
   and implementable.
-- The repo now has Lance intraday planning infrastructure. The live blocker is
-  provider availability/quality for current 2-minute bars, plus unsupported
-  order-flow/footprint components.
+- The primary blocker is **intraday 2-min bar data**, not missing rules.
+  Once this exists, the majority of the method can be automated.
 - Unlike Brando Le (zero rules, philosophy-only), this is a mechanical system
   with defined conditions.
 - Unlike the Sykes-style lens (small-cap penny stock gappers), this operates on

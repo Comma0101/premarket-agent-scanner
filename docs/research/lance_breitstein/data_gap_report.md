@@ -12,10 +12,10 @@ actionable.
 
 | Need | Why It Matters | Current Status | Candidate Sources | Blocks Profile? |
 | --- | --- | --- | --- | --- |
-| 2-minute bar data | Required for ALL entry triggers (prior bar high/low break), stops (prior bar low/high), volume comparison (2x rule), consecutive bar count, rate of change, 20-period MA target, trailing stops | **implemented when Alpaca bars are configured; provider quality still must be validated live** | Alpaca now; Polygon, Tradier, Tiingo as possible backups | No longer a code blocker; still a live-provider/readiness gate |
-| VWAP | Hard filter rule: "never long below VWAP unless capitulation." Also used as trend line. | **implemented from intraday bars** | Compute from intraday bar data | No longer a code blocker; unavailable when bars are missing |
-| Bollinger Bands (20-period, 2 std dev) | Chop/compression detection and overextension identification | **implemented as intraday technicals / chop context** | Compute from intraday bar data | No; keep testing live behavior |
-| Opening range (first 30-45 min) | Regime filter: trend vs. range day | **partial** | Compute from intraday bar data | No; current agent has opening-range regime labels but not full value-area context |
+| 2-minute bar data | Required for ALL entry triggers (prior bar high/low break), stops (prior bar low/high), volume comparison (2x rule), consecutive bar count, rate of change, 20-period MA target, trailing stops | **missing** | Alpaca (free tier has 1-min/2-min bars), Polygon, Tradier, Tiingo | **Yes — this is the single critical blocker** |
+| VWAP | Hard filter rule: "never long below VWAP unless capitulation." Also used as trend line. | **missing** | Alpaca, Polygon, or compute from intraday bar data (typical price × volume / cumulative volume) | **Yes — second most critical** |
+| Bollinger Bands (20-period, 2 std dev) | Chop/compression detection and overextension identification | **missing** | Compute from intraday bar data once bars exist | No — can add after bars |
+| Opening range (first 30-45 min) | Regime filter: trend vs. range day | **missing** | Compute from intraday bar data once bars exist | No — can add after bars |
 | Prior day value area | Regime filter component | **missing** | Volume profile data; complex to compute | No — nice-to-have, not blocking |
 | Order flow / DOM / Level 2 | Reads ladder for absorption vs. offering | **missing** | Databento, Bookmap, Exegy | No — flag as limitation |
 | Footprint / delta divergence | Exhaustion detection | **missing** | Databento, tick data | No — flag as limitation |
@@ -50,9 +50,9 @@ entry triggers, stops, and volume confirmation require 2-min bar data.
 - Output: "potential mean-reversion setup — requires intraday confirmation"
 - Cannot output entry/exit signals
 
-### Phase 2: Intraday Scanner (Current Bar-Backed Mode)
+### Phase 2: Intraday Scanner (After 2-min Bar Data)
 
-- Use configured 2-min bar provider (Alpaca path exists)
+- Add 2-min bar provider (Alpaca free tier)
 - Compute: VWAP, prior bar high/low, 2x volume comparison, consecutive bar
   count, rate of change, 20-period MA, Bollinger Bands
 - Implement entry triggers: prior 2-min bar break
@@ -86,7 +86,7 @@ entry triggers, stops, and volume confirmation require 2-min bar data.
 | --- | --- | --- | --- |
 | Brando Le | **No** (zero rules) | No (options chain) | **Source gap** — cannot fix with data |
 | Timothy Sykes | Yes | Partially | **Data gap** — fixable |
-| Lance Breitstein | **Yes** (most concrete rules) | Mostly for bar-backed scanner when providers are configured | **Policy + provider-quality gap** — deepen decision policy and validate live bars |
+| Lance Breitstein | **Yes** (most concrete rules) | Partially | **Data gap** — fixable with 2-min bars |
 
 The Breitstein profile is the strongest candidate for the next production
 scanner because the gap is purely data, not rules.

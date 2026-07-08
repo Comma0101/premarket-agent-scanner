@@ -6,6 +6,11 @@ import typer
 
 from app.models import SmallCapCandidate, SmallCapEvidence
 from cli._render import format_gap, format_market_cap, format_price, format_rvol
+from services.session_time_service import (
+    data_caveat_for,
+    parse_iso_utc,
+    session_banner_for,
+)
 from services.small_cap_scanner_service import SmallCapScannerService
 
 app = typer.Typer(add_completion=False, help="Small-cap discovery scanner.")
@@ -39,18 +44,12 @@ def main(
     include_rejected: bool = typer.Option(
         False,
         "--include-rejected",
-        help=(
-            "Show rejected candidates (score=0, grade=REJECT) so the desk can "
-            "see why nothing qualified. Off by default."
-        ),
+        help="Show rejected rows with reject reasons and data caveats.",
     ),
     live_intraday: bool = typer.Option(
         False,
         "--live-intraday",
-        help=(
-            "Live discovery mode: keep price movers when market cap, volume, or RVOL "
-            "need enrichment; rows remain caveated."
-        ),
+        help="Live discovery mode: keep movers while enrichment is incomplete.",
     ),
     all_universes: bool = typer.Option(False, "--all", help="Scan every defined universe."),
 ) -> None:
@@ -74,18 +73,19 @@ def main(
         )
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    _render(output, include_rejected=include_rejected)
+    _render(output)
 
 
-def _render(output, *, include_rejected: bool = False) -> None:
+def _render(output) -> None:
     try:
         from rich.console import Console
         from rich.table import Table
     except ImportError:
-        _render_plain(output, include_rejected=include_rejected)
+        _render_plain(output)
         return
 
     console = Console()
+    console.print(f"[dim]Session: {_session_banner(output)}[/dim]")
     table = Table(title=f"Small-cap scan [{output.preset}]", header_style="bold")
     table.add_column("Ticker", style="bold cyan")
     table.add_column("Grade")
@@ -112,52 +112,15 @@ def _render(output, *, include_rejected: bool = False) -> None:
 
     console.print(table)
     console.print(f"[dim]{output.candidate_count} candidate(s).[/dim]")
-    _render_empty_state(console, output)
-    if include_rejected:
-        _render_rejected(console, output)
+    _render_empty_state_rich(console, output)
+    _render_rejected_rich(console, output)
     for note in output.notes:
         console.print(f"[dim]note: {note}[/dim]")
 
 
-def _render_rejected(console, output) -> None:
-    from rich.table import Table
-
-    rejected = list(getattr(output, "rejected", []) or [])
-    if not rejected:
-        return
-    rejected_table = Table(
-        title=f"Rejected candidates ({len(rejected)})",
-        header_style="bold yellow",
-    )
-    rejected_table.add_column("Ticker", style="bold yellow")
-    rejected_table.add_column("Score", justify="right")
-    rejected_table.add_column("Gap", justify="right")
-    rejected_table.add_column("Reason", overflow="ellipsis", max_width=80)
-
-    for item in rejected:
-        reason = _first_risk_note(item.risk_notes) or "-"
-        rejected_table.add_row(
-            item.ticker,
-            str(item.score),
-            format_gap(item.gap_pct),
-            reason,
-        )
-    console.print(rejected_table)
-
-
-def _render_empty_state(console, output) -> None:
-    reason = getattr(output, "zero_result_reason", None)
-    suggestions = list(getattr(output, "relax_suggestions", []) or [])
-    if not reason and output.candidate_count > 0:
-        return
-    if reason:
-        console.print(f"[yellow]zero_result_reason: {reason}[/yellow]")
-    for suggestion in suggestions:
-        console.print(f"[yellow]suggestion: {suggestion}[/yellow]")
-
-
-def _render_plain(output, *, include_rejected: bool = False) -> None:
+def _render_plain(output) -> None:
     print(f"Small-cap scan [{output.preset}]")
+    print(f"Session: {_session_banner(output)}")
     if not output.candidates:
         print("No candidates.")
     for item in output.candidates:
@@ -177,30 +140,79 @@ def _render_plain(output, *, include_rejected: bool = False) -> None:
             f"missing={_format_candidate_missing_fields(item)}"
         )
     print(f"{output.candidate_count} candidate(s).")
-    reason = getattr(output, "zero_result_reason", None)
-    if reason:
-        print(f"zero_result_reason: {reason}")
-    for suggestion in getattr(output, "relax_suggestions", []) or []:
-        print(f"suggestion: {suggestion}")
-    if include_rejected:
-        rejected = list(getattr(output, "rejected", []) or [])
-        if rejected:
-            print(f"\nRejected candidates ({len(rejected)}):")
-            for item in rejected:
-                reason = _first_risk_note(item.risk_notes) or "-"
-                print(
-                    f"  {item.ticker:<6} score={item.score:>3} "
-                    f"gap={format_gap(item.gap_pct):>8} reason={reason}"
-                )
+    _render_empty_state_plain(output)
+    _render_rejected_plain(output)
     for note in output.notes:
         print(f"note: {note}")
 
 
-def _first_risk_note(notes: list[str]) -> str | None:
-    for note in notes:
-        if note:
-            return note
-    return None
+def _render_empty_state_rich(console, output) -> None:
+    if not output.zero_result_reason:
+        return
+    console.print(f"[dim]zero_result_reason: {output.zero_result_reason}[/dim]")
+    for suggestion in output.relax_suggestions:
+        console.print(f"[dim]suggestion: {suggestion}[/dim]")
+
+
+def _render_rejected_rich(console, output) -> None:
+    if not output.rejected:
+        return
+    console.print(f"[dim]{output.rejected_count} rejected candidate(s).[/dim]")
+    for item in output.rejected:
+        caveat = data_caveat_for(
+            item.timestamp,
+            gap_basis=item.gap_basis,
+            confidence=item.confidence,
+            halt_status=item.halt_status,
+        )
+        suffix = f" | {caveat}" if caveat else ""
+        console.print(
+            f"[dim]reject {item.ticker}: score={item.score} "
+            f"reasons={'; '.join(item.risk_notes) or '-'}{suffix}[/dim]"
+        )
+
+
+def _render_empty_state_plain(output) -> None:
+    if not output.zero_result_reason:
+        return
+    print(f"zero_result_reason: {output.zero_result_reason}")
+    for suggestion in output.relax_suggestions:
+        print(f"suggestion: {suggestion}")
+
+
+def _render_rejected_plain(output) -> None:
+    if not output.rejected:
+        return
+    print(f"{output.rejected_count} rejected candidate(s).")
+    for item in output.rejected:
+        caveat = data_caveat_for(
+            item.timestamp,
+            gap_basis=item.gap_basis,
+            confidence=item.confidence,
+            halt_status=item.halt_status,
+        )
+        suffix = f" | {caveat}" if caveat else ""
+        print(
+            f"reject {item.ticker}: score={item.score} "
+            f"reasons={'; '.join(item.risk_notes) or '-'}{suffix}"
+        )
+
+
+def _session_banner(output) -> str:
+    return session_banner_for(_latest_candidate_timestamp(output))
+
+
+def _latest_candidate_timestamp(output) -> str | None:
+    latest_raw: str | None = None
+    latest_dt = None
+    for candidate in [*output.candidates, *output.rejected]:
+        parsed = parse_iso_utc(candidate.timestamp)
+        if parsed is None:
+            continue
+        if latest_dt is None or parsed > latest_dt:
+            latest_dt = parsed
+            latest_raw = candidate.timestamp
+    return latest_raw
 
 
 def _format_missing_fields(missing_fields: list[str]) -> str:

@@ -306,6 +306,86 @@ def _latest_timestamp(*groups: list[Any]) -> str | None:
     return latest
 
 
+def _breitstein_candidate_to_dict(candidate: Any) -> dict[str, Any]:
+    missing_fields = (
+        candidate.evidence.missing_fields
+        if candidate.evidence is not None
+        else candidate.missing_fields
+    )
+    return {
+        "ticker": candidate.ticker,
+        "name": candidate.name,
+        "market_cap": candidate.market_cap,
+        "gap_pct": candidate.gap_pct,
+        "gap_dollar": candidate.gap_dollar,
+        "gap_basis": candidate.gap_basis,
+        "volume": candidate.volume,
+        "rel_volume": candidate.rel_volume,
+        "confidence": candidate.confidence,
+        "cap_tier": candidate.cap_tier,
+        "abnormal_move": candidate.abnormal_move,
+        "consecutive_days_direction": candidate.consecutive_days_direction,
+        "has_catalyst": candidate.has_catalyst,
+        "score": candidate.score,
+        "grade": candidate.grade,
+        "matched_signals": candidate.matched_signals,
+        "missing_fields": missing_fields,
+        "risk_notes": candidate.risk_notes,
+        "sources": candidate.sources,
+        "evidence": _small_cap_evidence_to_dict(candidate.evidence),
+        "timestamp": candidate.timestamp,
+    }
+
+
+def scan_breitstein(
+    *,
+    preset_name: str = "breitstein_intraday_v0",
+    universe: str | None = None,
+    watchlist: str | None = None,
+    tickers: str | None = None,
+    all_universes: bool = False,
+    market: str | None = None,
+    market_limit: int | None = None,
+    max_workers: int | None = None,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    if not any([universe, watchlist, tickers, all_universes, market]):
+        return {
+            "error": "Provide at least one of: universe, watchlist, tickers, market, or all_universes."
+        }
+
+    scanner = service
+    if scanner is None:
+        from services.breitstein_scanner_service import BreitsteinScannerService
+
+        scanner = BreitsteinScannerService()
+
+    try:
+        output = scanner.scan(
+            preset_name=preset_name,
+            universe=universe,
+            watchlist=watchlist,
+            tickers=tickers,
+            all_universes=all_universes,
+            market=market,
+            market_limit=market_limit,
+            max_workers=max_workers,
+        )
+    except KeyError as exc:
+        return {"error": str(exc)}
+
+    return {
+        "preset": output.preset,
+        "phase": output.phase,
+        "run_ids": output.run_ids,
+        "candidate_count": output.candidate_count,
+        "candidates": [
+            _breitstein_candidate_to_dict(candidate) for candidate in output.candidates
+        ],
+        "notes": output.notes,
+    }
+
+
 def list_universes(*, service: UniverseService | None = None) -> dict[str, Any]:
     """List defined universes and watchlists with their tickers."""
     svc = service or UniverseService()

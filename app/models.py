@@ -15,11 +15,20 @@ Confidence = Literal[
     "STALE_DATA",
     "ERROR",
 ]
+
+# Top-level summary of how the snapshot pipeline ran. Distinct from
+# `confidence` (data quality) — `data_status` labels the source pipeline so
+# the desk can triage at a glance:
+#   - "live"             : at least one provider returned clean data
+#   - "partial"          : some fields could not be resolved (MISSING_*)
+#   - "stale"            : data is older than the staleness window
+#   - "provider_failure" : every configured provider errored
+#   - "no_providers"     : no providers were configured at all
 DataStatus = Literal["live", "partial", "stale", "provider_failure", "no_providers"]
-HaltState = Literal["HALTED", "RESUMED", "NOT_HALTED", "UNKNOWN"]
 
 Direction = Literal["up", "down", "both"]
 SmallCapGrade = Literal["A_WATCH", "B_WATCH", "C_WATCH", "REJECT"]
+BreitsteinGrade = Literal["A_WATCH", "B_WATCH", "C_WATCH", "REJECT"]
 
 
 def utc_now_iso() -> str:
@@ -80,14 +89,14 @@ class ProviderPriceData:
 @dataclass
 class HaltStatus:
     ticker: str
-    status: HaltState
+    status: str
+    is_active: bool = False
     reason_code: str | None = None
     reason: str | None = None
     halt_time: str | None = None
     resume_time: str | None = None
-    source: str = "nasdaq_trader_halts"
-    raw: dict[str, Any] = field(default_factory=dict)
-    notes: list[str] = field(default_factory=list)
+    source: str | None = None
+    fetched_at: str | None = None
     error: str | None = None
 
 
@@ -105,9 +114,6 @@ class CombinedSnapshot:
     source_primary: str | None
     source_secondary: str | None
     confidence: Confidence
-    data_status: DataStatus = "live"
-    provider_failures: dict[str, str] = field(default_factory=dict)
-    halt_status: HaltStatus | None = None
     sources: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     market_cap: float | None = None
@@ -116,6 +122,12 @@ class CombinedSnapshot:
     raw_alpaca_json: str | None = None
     yfinance_data: ProviderPriceData | None = None
     alpaca_data: ProviderPriceData | None = None
+    # Structured provider-failure surface. Maps source name -> first error string.
+    # Always populated so the desk can branch on it without parsing `notes`.
+    provider_failures: dict[str, str] = field(default_factory=dict)
+    # Top-level data pipeline summary; see `DataStatus` literal above.
+    data_status: DataStatus = "live"
+    halt_status: HaltStatus | None = None
 
 
 @dataclass
@@ -210,8 +222,6 @@ class ScannerResult:
     confidence: Confidence
     notes: str | None
     rel_volume: float | None = None
-    # Basis for rel_volume. Current scanner RVOL is session/current volume vs
-    # average daily volume; it is not same-time-of-day intraday RVOL.
     rel_volume_basis: str | None = None
     gap_dollar: float | None = None
     # What the gap's effective price actually is: "premarket" (genuine premarket
@@ -220,6 +230,7 @@ class ScannerResult:
     gap_basis: str | None = None
     sources: list[str] = field(default_factory=list)
     timestamp: str | None = None
+    halt_status: HaltStatus | None = None
     created_at: str = field(default_factory=utc_now_iso)
 
 
@@ -276,6 +287,41 @@ class SmallCapEvidence:
 
 
 @dataclass
+class BreitsteinCandidate:
+    ticker: str
+    name: str | None
+    market_cap: float | None
+    gap_pct: float | None
+    gap_dollar: float | None
+    volume: float | None
+    rel_volume: float | None
+    confidence: Confidence
+    gap_basis: str | None
+    cap_tier: str | None
+    abnormal_move: bool | None
+    consecutive_days_direction: int | None
+    has_catalyst: bool | None
+    score: int = 0
+    grade: BreitsteinGrade = "REJECT"
+    matched_signals: list[str] = field(default_factory=list)
+    missing_fields: list[str] = field(default_factory=list)
+    risk_notes: list[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    evidence: SmallCapEvidence | None = None
+    timestamp: str | None = None
+
+
+@dataclass
+class BreitsteinScanOutput:
+    preset: str
+    run_ids: list[str]
+    candidate_count: int
+    candidates: list[BreitsteinCandidate]
+    phase: str = "1"
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
 class SmallCapCandidate:
     ticker: str
     name: str | None
@@ -295,6 +341,7 @@ class SmallCapCandidate:
     sources: list[str] = field(default_factory=list)
     evidence: SmallCapEvidence | None = None
     timestamp: str | None = None
+    halt_status: HaltStatus | None = None
 
 
 @dataclass
@@ -304,13 +351,8 @@ class SmallCapScanOutput:
     candidate_count: int
     candidates: list[SmallCapCandidate]
     notes: list[str] = field(default_factory=list)
-    # Optional rejected rows, only populated when the caller opts in via
-    # `include_rejected=True`. Hidden by default so existing callers keep the
-    # same surface and the agent layer does not need to filter before display.
-    rejected: list[SmallCapCandidate] = field(default_factory=list)
     rejected_count: int = 0
-    # Structured empty-state hint surfaced when candidate_count == 0. None when
-    # there is nothing to explain. Always paired with `relax_suggestions`.
+    rejected: list[SmallCapCandidate] = field(default_factory=list)
     zero_result_reason: str | None = None
     relax_suggestions: list[str] = field(default_factory=list)
 
@@ -371,26 +413,39 @@ class BreitsteinEntrySignal:
 class FirstRedDaySignal:
     ticker: str
     consecutive_green_days: int
-    entry_price: float | None
-    stop_price: float | None
-    vwap: float | None
+    breakdown_reference_price: float | None
+    risk_reference_price: float | None
     prior_day_close: float | None
-    vwap_filter_passed: bool
+    hod_before_breakdown: float | None
+    breakdown_bar_low: float | None
+    vwap: float | None
+    vwap_filter_passed: bool | None
     timestamp: str
+    source: str | None
+    fetched_at: str | None
     confidence: str
     missing_fields: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass
 class GrittaniPanicSignal:
     ticker: str
-    multi_day_run_pct: float
-    intraday_drop_pct: float
-    entry_price: float | None
-    stop_price: float | None
+    multi_day_run_pct: float | None
+    intraday_drop_pct: float | None
+    panic_high: float | None
+    panic_low: float | None
+    bounce_reference_price: float | None
+    risk_reference_price: float | None
+    prior_day_close: float | None
+    vwap: float | None
+    rvol: float | None
     timestamp: str
+    source: str | None
+    fetched_at: str | None
     confidence: str
     missing_fields: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
 
 class PriceProvider(Protocol):
@@ -411,5 +466,11 @@ class BarProvider(Protocol):
     source_name: str
 
     def get_bars(
-        self, ticker: str, timeframe: str, start: str, end: str, limit: int = 100
-    ) -> IntradayBarSeries: ...
+        self,
+        ticker: str,
+        timeframe: str = "2Min",
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 100,
+    ) -> IntradayBarSeries:
+        ...

@@ -22,9 +22,9 @@ class DailyBarService:
         """Returns the list of bars excluding today's incomplete bar."""
         if not series or not series.bars:
             return []
-        
+
         bars = series.bars.copy()
-        
+
         try:
             last_timestamp = bars[-1].timestamp.replace("Z", "+00:00")
             dt = datetime.fromisoformat(last_timestamp)
@@ -35,7 +35,7 @@ class DailyBarService:
                 bars.pop()
         except ValueError:
             pass
-            
+
         return bars
 
     def consecutive_green_days(self, series: IntradayBarSeries) -> int:
@@ -43,7 +43,7 @@ class DailyBarService:
         bars = self._get_completed_bars(series)
         if len(bars) < 2:
             return 0
-            
+
         count = 0
         for i in range(len(bars) - 1, 0, -1):
             curr_bar = bars[i]
@@ -59,14 +59,14 @@ class DailyBarService:
         bars = self._get_completed_bars(series)
         if len(bars) < 2:
             return 0.0
-            
+
         current_close = bars[-1].close
         start_index = max(0, len(bars) - 1 - days)
         start_close = bars[start_index].close
-        
+
         if start_close == 0:
             return 0.0
-            
+
         return ((current_close - start_close) / start_close) * 100.0
 
     def prior_day_levels(self, series: IntradayBarSeries) -> dict[str, float | None]:
@@ -74,7 +74,7 @@ class DailyBarService:
         bars = self._get_completed_bars(series)
         if not bars:
             return {"close": None, "low": None, "high": None, "open": None}
-            
+
         prior_bar = bars[-1]
         return {
             "close": prior_bar.close,

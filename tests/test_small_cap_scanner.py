@@ -14,6 +14,7 @@ from app.models import (
     SmallCapCandidate,
     SmallCapEvidence,
     SmallCapScanOutput,
+    HaltStatus,
 )
 from cli.scan_small_caps import _format_evidence_float
 from services.scanner_service import compute_float_rotation
@@ -240,6 +241,7 @@ def _result(
     rel_volume=5.0,
     confidence="OK",
     gap_basis=None,
+    halt_status=None,
 ):
     return ScannerResult(
         ticker=ticker,
@@ -258,6 +260,7 @@ def _result(
         notes=None,
         sources=["fake"],
         timestamp="2026-06-28T12:00:00Z",
+        halt_status=halt_status,
     )
 
 
@@ -361,6 +364,59 @@ def test_small_cap_scanner_attaches_evidence_to_candidates():
     assert candidate.evidence.float_shares == 8_000_000
 
 
+def test_small_cap_scanner_hides_rejected_rows_by_default():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[_result(ticker="BAD", confidence="CONFLICT")],
+                notes=[],
+            )
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=None,
+    ).scan(tickers="BAD", preset_name="sykes_small_cap_v0")
+
+    assert output.candidates == []
+    assert output.candidate_count == 0
+    assert output.rejected == []
+    assert output.rejected_count == 0
+    assert output.zero_result_reason == "all_failed_data_quality"
+    assert output.relax_suggestions
+
+
+def test_small_cap_scanner_can_include_rejected_rows_with_reasons():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[_result(ticker="BAD", confidence="CONFLICT")],
+                notes=[],
+            )
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=None,
+    ).scan(tickers="BAD", preset_name="sykes_small_cap_v0", include_rejected=True)
+
+    assert output.candidates == []
+    assert output.rejected_count == 1
+    assert output.rejected[0].ticker == "BAD"
+    assert output.rejected[0].grade == "REJECT"
+    assert "unusable_confidence" in output.rejected[0].matched_signals
+    assert output.zero_result_reason == "all_failed_data_quality"
+    assert any("PRE_MARKET" in item for item in output.relax_suggestions)
+
+
 def test_grade_strong_small_cap_candidate_is_a_watch():
     candidate = grade_small_cap_candidate(
         _result(),
@@ -422,6 +478,27 @@ def test_conflict_candidate_is_rejected():
 
     assert candidate.grade == "REJECT"
     assert "unusable_confidence" in candidate.matched_signals
+
+
+def test_active_halt_candidate_is_rejected_even_with_clean_price_data():
+    candidate = grade_small_cap_candidate(
+        _result(
+            gap_basis="premarket",
+            halt_status=HaltStatus(
+                ticker="HOT",
+                status="HALTED_REGULATORY",
+                is_active=True,
+                reason_code="T1",
+                halt_time="2026-06-30T13:35:00+00:00",
+                source="fake_halts",
+            ),
+        ),
+        missing_fields=[],
+    )
+
+    assert candidate.grade == "REJECT"
+    assert "active_halt" in candidate.matched_signals
+    assert any("halt" in note.lower() for note in candidate.risk_notes)
 
 
 def test_float_rotation_adjustment_lifts_score_without_bypassing_gap_basis_gate():

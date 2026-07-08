@@ -291,6 +291,7 @@ class ScannerService:
             gap_basis=gap_basis,
             sources=snapshot.sources,
             timestamp=snapshot.timestamp,
+            halt_status=snapshot.halt_status,
         )
 
         if self._passes_filters(result, filters):

@@ -102,13 +102,13 @@ def test_get_ticker_snapshot_tool_surfaces_halt_status():
     assert out["halt_status"] == {
         "ticker": "ABCD",
         "status": "HALTED",
+        "is_active": False,
         "reason_code": "LUDP",
         "reason": None,
         "halt_time": "07/01/2026 09:35:12",
         "resume_time": None,
         "source": "nasdaq_trader_halts",
-        "raw": {},
-        "notes": [],
+        "fetched_at": None,
         "error": None,
     }
 
@@ -1314,6 +1314,7 @@ def test_tool_definitions_are_well_formed():
     assert names == {
         "scan_premarket",
         "scan_small_caps",
+        "scan_breitstein",
         "run_trading_desk",
         "run_sykes_live",
         "list_universes",

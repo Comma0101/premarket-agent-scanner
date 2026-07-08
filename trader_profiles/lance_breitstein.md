@@ -6,9 +6,9 @@
 > method rules, not trading advice.
 >
 > **Critical data note**: This profile requires **2-minute intraday bar data**
-> and **VWAP** for entry triggers, stops, and volume confirmation. The repo now
-> has bar-backed Lance plan services when a provider is configured; without
-> current bars, the profile must fall back to candidate/watchlist mode only.
+> and **VWAP** for entry triggers, stops, and volume confirmation. Without these,
+> the profile can only identify candidate underlyings (Phase 1). Entry/exit
+> signals require Phase 2 data.
 >
 > **Missing method components**: Order flow (DOM/tape), footprint/delta analysis
 > are core to the source's method but cannot be automated with current data
@@ -37,40 +37,6 @@ defined stop. Expected value is the governing framework: stack conditions that
 increase reversal probability, expand reward, and define risk. Speed of the move
 is the most important factor — fast moves are more likely to revert than slow
 grinds.
-
-## Agent operating policy
-
-The Lance agent should behave as a read-only intraday co-pilot, not a generic
-market assistant. Its job is to determine whether a ticker is truly in play,
-what playbook it fits, what confirmation is still missing, and what invalidates
-the idea. The full operating policy lives in
-`docs/research/lance_breitstein/agent_policy.md`.
-
-### Decision sequence
-
-1. **Data gate:** block non-`OK` confidence, stale/provider-failure data, missing
-   effective price, unclear gap basis, or active `HALTED` status.
-2. **In-play gate:** require abnormal movement, RVOL participation, and a reason
-   the move is not just ordinary broad-market noise.
-3. **Dislocation gate:** prefer emotional/temporary dislocation, forced flow,
-   panic, or euphoric blow-off. Downgrade obvious fundamental repricing.
-4. **Structure gate:** require clean intraday structure; avoid chop/compression.
-5. **Right-side gate:** wait for prior-bar break / trend shift. Do not fade the
-   front side.
-6. **Review loop:** after the session, journal whether the setup worked, failed,
-   chopped, reversed, or stayed unknown.
-
-### Agent states
-
-- `blocked_data_quality` — stale, conflicted, missing, provider failure, or
-  active halt. Do not rank as actionable.
-- `not_in_play` — data is usable, but move/volume/context is not abnormal enough.
-- `watching` — candidate is relevant, but confirmation is not forming yet.
-- `setup_forming` — pressure, volume, or structure is developing.
-- `waiting_for_turn` — front-side move is active; Lance is waiting for the turn.
-- `triggered_reference` — tool found a prior-bar break/reference condition.
-- `invalidated` — chop, failed structure, halt, stale data, or thesis break.
-- `review_needed` — outcome needs human labeling.
 
 ## Preferred setups
 
@@ -135,28 +101,16 @@ emotional/temporary vs. fundamental repricing, sector theme of the day.
 Output: "Potential mean-reversion candidate — requires intraday 2-min bar
 confirmation for entry signal."
 
-### Phase 2: Intraday Scanner (2-min bar data + VWAP)
+### Phase 2: Intraday Scanner (after 2-min bar data + VWAP)
 
 ```
-build_lance_intraday_plan(ticker="MRVL")
-run_lance_desk_cycle(tickers=["MRVL", "HOOD"], persist=true)
-
-# Logic:
-# abnormal intraday move + RVOL participation + pressure structure
-# + prior 2-min bar break + VWAP/filter context + chop filter
-# Reference entry: prior 2-min bar high break (longs) or low break (shorts)
-# Reference risk: prior 2-min bar low (longs) or high (shorts)
-# Equilibrium reference: 20-period moving average
+# Not yet implementable — requires new data layer
+# Logic: scan for stocks with abnormal intraday move + 2x volume panic bar
+# + prior 2-min bar break + VWAP filter
+# Entry: prior 2-min bar high break (longs) or low break (shorts)
+# Stop: prior 2-min bar low (longs) or high (shorts)
+# Target: 20-period MA
 ```
-
-### Closed-market replay workflow
-
-When current market data is `STALE_DATA` or the session is closed, do not wait
-for the next market day just to test Lance workflow behavior. Use
-`run_lance_replay` on a scratch database copy of the saved Lance session. Replay
-may apply synthetic labels such as `worked`, `failed`, `chop`, or `reversed`,
-but those labels are workflow tests unless the human has manually reviewed the
-chart/session. Never write synthetic replay labels to the source database.
 
 ## Grading rubric (A / B / C)
 
@@ -168,23 +122,13 @@ chart/session. Never write synthetic replay labels to the source database.
 - **C:** Marginal gap, low RVOL, slow grinding move, Bollinger compression,
   no catalyst, or `CONFLICT`/`STALE` data.
 
-### Phase 2 (With Intraday Bars)
+### Phase 2 (With Intraday Bars — Future)
 - **A:** All Phase 1 A conditions + 2x volume panic bar + prior 2-min bar
   break confirmed + VWAP filter passed + multi-timeframe alignment.
 - **B:** Good underlying but missing one intraday confirmation (volume < 2x,
   or VWAP filter marginal, or no multi-timeframe alignment).
 - **C:** Underlying qualifies but intraday setup not confirmed — no entry
   signal, wait.
-
-### Agent Quality Language
-
-- **A-quality watch:** data is OK, no active halt, move is abnormal, RVOL is
-  present, right-side confirmation is present or very near, catalyst/context is
-  not obvious permanent repricing, and chop is absent.
-- **B-quality watch:** one important piece is missing, such as unclear catalyst,
-  mixed relative strength, or no confirmed prior-bar break yet.
-- **C/context:** multiple pieces are missing, the move is slow/noisy, or data
-  quality prevents conviction.
 
 ## Avoid / red flags
 - **Never fade the front side** of a move (buying a falling knife without

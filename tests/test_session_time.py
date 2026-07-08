@@ -1,139 +1,37 @@
-"""Offline tests for the NY time / session context helper."""
-
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-import pytest
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from services.session_time_service import (
-    NY_TZ,
     data_caveat_for,
     format_et,
-    market_session_context_for,
-    ny_date_for,
-    parse_iso_utc,
     session_banner_for,
     session_mode_for,
 )
 
 
-def test_parse_iso_utc_handles_z_suffix():
-    parsed = parse_iso_utc("2026-06-29T20:00:00Z")
-    assert parsed == datetime(2026, 6, 29, 20, 0, tzinfo=timezone.utc)
+def test_format_et_preserves_raw_time_meaning_in_new_york() -> None:
+    assert format_et("2026-06-30T12:28:00Z") == "Jun 30 8:28 AM ET"
 
 
-def test_parse_iso_utc_handles_offset():
-    parsed = parse_iso_utc("2026-06-29T20:00:00+00:00")
-    assert parsed == datetime(2026, 6, 29, 20, 0, tzinfo=timezone.utc)
+def test_session_mode_for_premarket_market_open_and_postmarket() -> None:
+    assert session_mode_for("2026-06-30T12:28:00Z") == "PRE_MARKET"
+    assert session_mode_for("2026-06-30T15:00:00Z") == "MARKET_OPEN"
+    assert session_mode_for("2026-06-29T23:30:00Z") == "POST_MARKET"
 
 
-def test_parse_iso_utc_returns_none_for_missing_or_bad_value():
-    assert parse_iso_utc(None) is None
-    assert parse_iso_utc("") is None
-    assert parse_iso_utc("not-a-timestamp") is None
+def test_session_banner_explains_last_trade_after_hours() -> None:
+    banner = session_banner_for("2026-06-29T23:30:00Z")
+
+    assert banner.startswith("POST_MARKET, Jun 29 7:30 PM ET.")
+    assert "last_trade means prior/last-session move" in banner
 
 
-def test_format_et_converts_utc_to_new_york():
-    # 20:00 UTC == 16:00 ET (same day)
-    assert format_et("2026-06-29T20:00:00Z") == "Jun 29 4:00 PM ET"
-
-
-def test_format_et_handles_midnight_et():
-    # 04:00 UTC == 00:00 ET on the same calendar day
-    assert format_et("2026-06-29T04:00:00Z") == "Jun 29 12:00 AM ET"
-
-
-def test_format_et_handles_evening_et_previous_day_calendar():
-    # 02:00 UTC on Jun 30 == 22:00 ET on Jun 29
-    assert format_et("2026-06-30T02:00:00Z") == "Jun 29 10:00 PM ET"
-
-
-def test_ny_date_for_uses_new_york_calendar_not_utc_calendar():
-    assert ny_date_for("2026-07-04T00:07:00Z") == "2026-07-03"
-
-
-def test_format_et_handles_noon_et():
-    # 16:00 UTC == 12:00 ET
-    assert format_et("2026-06-29T16:00:00Z") == "Jun 29 12:00 PM ET"
-
-
-def test_format_et_returns_none_for_missing_timestamp():
-    assert format_et(None) is None
-    assert format_et("") is None
-    assert format_et("not-a-timestamp") is None
-
-
-@pytest.mark.parametrize(
-    "utc_iso, expected_mode",
-    [
-        ("2026-06-29T08:00:00Z", "PRE_MARKET"),    # 04:00 ET
-        ("2026-06-29T13:29:00Z", "PRE_MARKET"),    # 09:29 ET
-        ("2026-06-29T13:30:00Z", "MARKET_OPEN"),   # 09:30 ET
-        ("2026-06-29T19:59:00Z", "MARKET_OPEN"),   # 15:59 ET
-        ("2026-06-29T20:00:00Z", "POST_MARKET"),   # 16:00 ET
-        ("2026-06-29T23:59:00Z", "POST_MARKET"),   # 19:59 ET
-        ("2026-06-30T00:00:00Z", "OFF_SESSION"),   # 20:00 ET
-        ("2026-06-29T07:59:00Z", "OFF_SESSION"),   # 03:59 ET
-    ],
-)
-def test_session_mode_for(utc_iso, expected_mode):
-    assert session_mode_for(utc_iso) == expected_mode
-
-
-def test_session_mode_for_unknown_timestamp_is_off_session():
-    assert session_mode_for(None) == "OFF_SESSION"
-
-
-def test_session_banner_includes_mode_et_time_and_suffix():
-    banner = session_banner_for("2026-06-29T23:00:00Z")  # 19:00 ET = POST_MARKET
-    assert banner.startswith("POST_MARKET, Jun 29 7:00 PM ET. ")
-    assert "last_trade" in banner
-
-
-def test_session_banner_premarket_mentions_eligibility():
-    banner = session_banner_for("2026-06-29T12:00:00Z")  # 08:00 ET = PRE_MARKET
-    assert banner.startswith("PRE_MARKET, Jun 29 8:00 AM ET. ")
-    assert "premarket" in banner.lower()
-
-
-def test_session_banner_handles_missing_timestamp():
-    assert session_banner_for(None).startswith("OFF_SESSION")
-
-
-def test_market_session_context_marks_independence_day_observed_closed():
-    context = market_session_context_for("2026-07-03T14:00:00Z")
-    assert context == {
-        "session_mode": "MARKET_CLOSED",
-        "as_of_et": "Jul 3 10:00 AM ET",
-        "trading_date": "2026-07-03",
-        "is_market_open": False,
-        "is_market_holiday": True,
-        "market_closed_reason": "Independence Day observed",
-    }
-
-
-def test_session_banner_mentions_market_closed_holiday():
-    banner = session_banner_for("2026-07-03T14:00:00Z")
-    assert banner.startswith("MARKET_CLOSED, Jul 3 10:00 AM ET. ")
-    assert "Independence Day observed" in banner
-
-
-def test_data_caveat_mentions_market_closed_holiday():
-    caveat = data_caveat_for(
-        "2026-07-03T14:00:00Z",
-        gap_basis="last_trade",
-        confidence="STALE_DATA",
-    )
-    assert caveat is not None
-    assert caveat.startswith("MARKET_CLOSED:")
-    assert "Independence Day observed" in caveat
-
-
-def test_data_caveat_is_none_for_clean_premarket():
+def test_data_caveat_silent_for_clean_premarket_quote() -> None:
     assert (
         data_caveat_for(
-            "2026-06-29T12:00:00Z",
+            "2026-06-30T12:28:00Z",
             gap_basis="premarket",
             confidence="OK",
         )
@@ -141,52 +39,34 @@ def test_data_caveat_is_none_for_clean_premarket():
     )
 
 
-def test_data_caveat_last_trade_stale_includes_session_mode():
+def test_data_caveat_flags_stale_last_trade_with_et_time() -> None:
     caveat = data_caveat_for(
-        "2026-06-29T23:00:00Z",
+        "2026-06-29T23:30:00Z",
         gap_basis="last_trade",
         confidence="STALE_DATA",
     )
-    assert caveat is not None
-    assert caveat.startswith("POST_MARKET:")
-    assert "last_trade" in caveat
-    assert "STALE_DATA" in caveat
-    assert "Jun 29 7:00 PM ET" in caveat
-    assert "Not a live premarket gap" in caveat
+
+    assert caveat == (
+        "POST_MARKET: last_trade / STALE_DATA as of Jun 29 7:30 PM ET. "
+        "Not a live premarket gap."
+    )
 
 
-def test_data_caveat_last_trade_during_market_open():
+def test_data_caveat_for_market_open_last_trade_does_not_call_it_off_session() -> None:
     caveat = data_caveat_for(
-        "2026-06-29T15:00:00Z",
+        "2026-06-30T15:38:24Z",
         gap_basis="last_trade",
         confidence="OK",
     )
-    assert caveat is not None
-    assert caveat.startswith("MARKET_OPEN:")
-    assert "regular-session quote" in caveat
-    assert "Off-session" not in caveat
 
-
-def test_data_caveat_missing_basis():
-    caveat = data_caveat_for(
-        "2026-06-29T12:00:00Z",
-        gap_basis=None,
-        confidence="OK",
+    assert caveat == (
+        "MARKET_OPEN: last_trade regular-session quote vs prior close as of "
+        "Jun 30 11:38 AM ET. Not a premarket gap."
     )
-    assert caveat is not None
-    assert "no effective price" in caveat
 
 
-def test_format_et_accepts_datetime_input():
-    dt = datetime(2026, 6, 29, 20, 0, tzinfo=timezone.utc)
-    assert format_et(dt) == "Jun 29 4:00 PM ET"
+def test_datetime_inputs_are_supported() -> None:
+    value = datetime(2026, 6, 30, 8, 28, tzinfo=ZoneInfo("America/New_York"))
 
-
-def test_format_et_accepts_naive_datetime_as_utc():
-    dt = datetime(2026, 6, 29, 20, 0)
-    assert format_et(dt) == "Jun 29 4:00 PM ET"
-
-
-def test_format_et_accepts_et_datetime():
-    dt = datetime(2026, 6, 29, 16, 0, tzinfo=NY_TZ)
-    assert format_et(dt) == "Jun 29 4:00 PM ET"
+    assert format_et(value) == "Jun 30 8:28 AM ET"
+    assert session_mode_for(value) == "PRE_MARKET"

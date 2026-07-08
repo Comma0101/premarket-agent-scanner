@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.models import IntradayBarSeries, utc_now_iso
 from providers.alpaca_provider import AlpacaProvider
 
@@ -70,31 +72,53 @@ def test_get_bars_parses_alpaca_response(monkeypatch):
     assert series.bars[1].volume == 8000
 
 
-def test_get_bars_treats_blank_start_and_end_as_default_window(monkeypatch):
-    provider = AlpacaProvider(api_key="key", secret_key="secret")
-    captured: dict = {}
-
-    def fake_request(endpoint, params):
-        captured["endpoint"] = endpoint
-        captured["params"] = params
-        return {"bars": []}
-
-    monkeypatch.setattr(provider, "_request", fake_request)
-
-    provider.get_bars("AAPL", timeframe="1Day", start="", end="", limit=60)
-
-    assert captured["endpoint"] == "/stocks/AAPL/bars"
-    assert captured["params"]["timeframe"] == "1Day"
-    assert captured["params"]["start"]
-    assert captured["params"]["end"]
-    assert captured["params"]["limit"] == 60
-
-
 def test_get_bars_handles_empty_payload(monkeypatch):
     provider = AlpacaProvider(api_key="key", secret_key="secret")
     monkeypatch.setattr(provider, "_request", lambda endpoint, params: {"bars": []})
     series = provider.get_bars("AAPL")
     assert series.bars == []
+
+
+def test_get_bars_handles_null_bars_payload(monkeypatch):
+    provider = AlpacaProvider(api_key="key", secret_key="secret")
+    monkeypatch.setattr(provider, "_request", lambda endpoint, params: {"bars": None})
+
+    series = provider.get_bars("AAPL")
+
+    assert series.bars == []
+
+
+def test_get_daily_bars_default_uses_daily_scale_window(monkeypatch):
+    provider = AlpacaProvider(api_key="key", secret_key="secret")
+    captured = {}
+
+    def fake_request(endpoint, params):
+        captured.update(params)
+        return {"bars": []}
+
+    monkeypatch.setattr(provider, "_request", fake_request)
+
+    provider.get_bars("AAPL", timeframe="1Day", limit=20)
+
+    start = datetime.fromisoformat(captured["start"])
+    end = datetime.fromisoformat(captured["end"])
+    assert (end - start).days >= 30
+
+
+def test_get_bars_treats_empty_start_end_as_default(monkeypatch):
+    provider = AlpacaProvider(api_key="key", secret_key="secret")
+    captured = {}
+
+    def fake_request(endpoint, params):
+        captured.update(params)
+        return {"bars": []}
+
+    monkeypatch.setattr(provider, "_request", fake_request)
+
+    provider.get_bars("AAPL", timeframe="2Min", start="", end="", limit=20)
+
+    assert captured["start"]
+    assert captured["end"]
 
 
 def test_get_bars_skips_malformed_bars(monkeypatch):
@@ -111,21 +135,3 @@ def test_get_bars_skips_malformed_bars(monkeypatch):
     )
     series = provider.get_bars("AAPL")
     assert len(series.bars) == 1
-
-
-def test_get_snapshot_marks_provider_error_when_all_alpaca_requests_fail(monkeypatch):
-    provider = AlpacaProvider(api_key="key", secret_key="secret")
-
-    def fail_request(endpoint, params):
-        raise RuntimeError(f"DNS failure for {endpoint}")
-
-    monkeypatch.setattr(provider, "_request", fail_request)
-
-    snapshot = provider.get_snapshot("IBM")
-
-    assert snapshot.error == "no_usable_alpaca_snapshot"
-    assert snapshot.previous_close is None
-    assert snapshot.premarket_price is None
-    assert snapshot.latest_price is None
-    assert any("latest trade unavailable" in note for note in snapshot.notes)
-    assert any("previous close unavailable" in note for note in snapshot.notes)

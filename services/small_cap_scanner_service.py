@@ -73,7 +73,6 @@ class SmallCapScannerService:
             )
         candidates_by_ticker: dict[str, SmallCapCandidate] = {}
         rejected_by_ticker: dict[str, SmallCapCandidate] = {}
-        selection_resolved = False
         if market:
             if any([universe, watchlist, tickers, all_universes]):
                 raise ValueError("Use market by itself; do not combine it with universe/watchlist/tickers/all.")
@@ -92,7 +91,6 @@ class SmallCapScannerService:
             notes[1:1] = list(market_universe.notes)
             if market_limit is not None:
                 notes.insert(1, f"Limited market universe to {len(tickers)} symbol(s) for testing.")
-            selection_resolved = bool(tickers)
 
         min_market_cap, max_market_cap = _union_cap_bounds(preset.cap_tiers)
         filters = make_scan_filters(
@@ -115,10 +113,6 @@ class SmallCapScannerService:
         )
         run_ids.append(scan_run.run_id)
         notes.extend(scan_run.notes)
-        if not selection_resolved:
-            selection_resolved = bool(scan_run.results) or any(
-                [universe, watchlist, tickers, all_universes]
-            )
 
         for result in scan_run.results:
             candidate = grade_small_cap_candidate(
@@ -127,10 +121,8 @@ class SmallCapScannerService:
                 live_intraday=live_intraday,
             )
             if candidate.grade == "REJECT":
-                # Keep only the highest-scored reject per ticker (matches the
-                # candidate-side dedup behavior so callers see one row per name).
-                existing = rejected_by_ticker.get(candidate.ticker)
-                if existing is None or candidate.score > existing.score:
+                existing_rejected = rejected_by_ticker.get(candidate.ticker)
+                if existing_rejected is None or candidate.score > existing_rejected.score:
                     rejected_by_ticker[candidate.ticker] = candidate
                 continue
 
@@ -138,13 +130,12 @@ class SmallCapScannerService:
             if existing is None or candidate.score > existing.score:
                 candidates_by_ticker[candidate.ticker] = candidate
 
-        candidates = sorted(
-            candidates_by_ticker.values(),
-            key=lambda candidate: candidate.score,
-            reverse=True,
-        )
         rejected = sorted(
             rejected_by_ticker.values(),
+            key=lambda candidate: (-candidate.score, candidate.ticker),
+        )
+        candidates = sorted(
+            candidates_by_ticker.values(),
             key=lambda candidate: candidate.score,
             reverse=True,
         )
@@ -158,30 +149,24 @@ class SmallCapScannerService:
                 key=lambda candidate: candidate.score,
                 reverse=True,
             )
-
-        zero_result_reason: str | None = None
+        zero_result_reason = None
         relax_suggestions: list[str] = []
         if not candidates:
             zero_result_reason, relax_suggestions = _empty_state_guidance(
-                selection_resolved=selection_resolved,
-                rejected=rejected,
                 scan_results=scan_run.results,
+                rejected=rejected,
             )
-
-        output = SmallCapScanOutput(
+        return SmallCapScanOutput(
             preset=preset.name,
             run_ids=run_ids,
             candidate_count=len(candidates),
             candidates=candidates,
             notes=notes,
+            rejected_count=len(rejected) if include_rejected else 0,
+            rejected=rejected if include_rejected else [],
+            zero_result_reason=zero_result_reason,
+            relax_suggestions=relax_suggestions,
         )
-        if include_rejected:
-            output.rejected = rejected
-            output.rejected_count = len(rejected)
-        if zero_result_reason is not None:
-            output.zero_result_reason = zero_result_reason
-            output.relax_suggestions = relax_suggestions
-        return output
 
     def _market_universe_provider(self):
         if self.market_universe_provider is not None:
@@ -204,43 +189,20 @@ def _union_cap_bounds(cap_tiers: list[str]) -> tuple[float, float | None]:
     return min(lows), (None if upper == float("inf") else upper)
 
 
-# Reasons + suggestions are derived only from what the data layer actually
-# produced (selection size, rejected-row signals). We do not invent fixes for
-# filters we did not see — suggestions are scoped to what the caller can act on
-# without inventing market numbers.
-_EMPTY_STATE_ALL_DATA_QUALITY = "all_failed_data_quality"
-_EMPTY_STATE_ALL_FILTERED = "all_filtered"
-_EMPTY_STATE_EMPTY_SELECTION = "empty_selection"
-
-
 def _empty_state_guidance(
     *,
-    selection_resolved: bool,
+    scan_results: list[ScannerResult],
     rejected: list[SmallCapCandidate],
-    scan_results: list,
-) -> tuple[str | None, list[str]]:
-    """Decide why the candidate list is empty and what the caller can do next.
-
-    Returns (reason, suggestions). `reason` is None when the candidate list is
-    non-empty (the caller is expected to gate on that). Suggestions are derived
-    from observable data — never invented.
-    """
-    if not selection_resolved:
-        return (
-            _EMPTY_STATE_EMPTY_SELECTION,
-            [
-                "Pass a universe, watchlist, tickers, or --market to give the scanner something to evaluate.",
-            ],
+) -> tuple[str, list[str]]:
+    suggestions = [
+        "Review rejected rows with include_rejected=True to see which filter dropped each name.",
+        "Check missing_fields before relaxing scanner thresholds.",
+    ]
+    if not scan_results and not rejected:
+        suggestions.append(
+            "If the preset is too narrow, lower min_gap_abs or min_rel_volume before re-running."
         )
-
-    if not rejected:
-        return (
-            _EMPTY_STATE_ALL_FILTERED,
-            [
-                "Review rejected rows with include_rejected=True for the exact filter that dropped each name.",
-                "If the preset is too narrow, lower min_gap_abs or min_rel_volume before re-running.",
-            ],
-        )
+        return "all_filtered", suggestions
 
     data_quality_drops = sum(
         1
@@ -251,23 +213,17 @@ def _empty_state_guidance(
             for note in candidate.risk_notes
         )
     )
-    filter_drops = len(rejected) - data_quality_drops
-
-    suggestions: list[str] = [
-        "Review rejected rows with include_rejected=True to see which filter dropped each name.",
-        "Check missing_fields before relaxing scanner thresholds.",
-    ]
-    if data_quality_drops and data_quality_drops >= filter_drops:
+    if rejected and data_quality_drops >= len(rejected):
         suggestions.append(
             "Run during PRE_MARKET for premarket gap_basis eligibility; "
             "last_trade quotes rarely carry a clean confidence label."
         )
-        return (_EMPTY_STATE_ALL_DATA_QUALITY, suggestions)
+        return "all_failed_data_quality", suggestions
 
     suggestions.append(
         "If the preset is too narrow, lower min_gap_abs or min_rel_volume before re-running."
     )
-    return (_EMPTY_STATE_ALL_FILTERED, suggestions)
+    return "all_filtered", suggestions
 
 
 def grade_small_cap_candidate(
@@ -281,6 +237,20 @@ def grade_small_cap_candidate(
     risk_notes: list[str] = []
     provided_missing_fields = list(missing_fields)
     has_absolute_volume_floor = False
+
+    if result.halt_status is not None and result.halt_status.is_active:
+        matched.append("active_halt")
+        code = f" ({result.halt_status.reason_code})" if result.halt_status.reason_code else ""
+        risk_notes.append(f"Active trading halt{code}; verify halt/resume status before acting.")
+        risk_notes.extend(_missing_field_notes(provided_missing_fields))
+        return _candidate(
+            result,
+            0,
+            "REJECT",
+            matched,
+            provided_missing_fields,
+            risk_notes,
+        )
 
     if result.confidence in UNUSABLE_CONFIDENCE:
         matched.append("unusable_confidence")
@@ -517,11 +487,11 @@ def _candidate(
         confidence=result.confidence,
         score=score,
         grade=grade,
-        rel_volume_basis=result.rel_volume_basis,
         gap_basis=result.gap_basis,
         matched_signals=matched,
         missing_fields=missing_fields,
         risk_notes=risk_notes,
         sources=list(result.sources),
         timestamp=result.timestamp,
+        halt_status=result.halt_status,
     )

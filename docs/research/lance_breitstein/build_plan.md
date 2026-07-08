@@ -28,7 +28,10 @@ breitstein_mean_reversion_v0:
   min_rel_volume: 3.0
   include_low_confidence: false
   missing_fields: [intraday_bars, vwap, order_flow, footprint, news_classification]
-  notes: "Phase 1 — underlying watchlist only. No intraday entry triggers. Requires Phase 2 bar data for entry/exit signals."
+  notes:
+    - "Phase 1 underlying watchlist only."
+    - "No intraday entry triggers until Phase 2 bar data and VWAP are available."
+    - "Do not infer emotional capitulation from price/volume without catalyst context."
 ```
 
 ### 1.2 New Model: BreitsteinCandidate
@@ -57,11 +60,13 @@ class BreitsteinCandidate:
     missing_fields: list[str] = field(default_factory=list)
     risk_notes: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
+    evidence: SmallCapEvidence | None = None
+    timestamp: str | None = None
 
 @dataclass
 class BreitsteinScanOutput:
     preset: str
-    run_id: str | None
+    run_ids: list[str]
     candidate_count: int
     candidates: list[BreitsteinCandidate]
     phase: str = "1"
@@ -123,6 +128,8 @@ Grade thresholds:
 
 Apply risk gates (these cap grades):
 - If confidence in UNUSABLE_CONFIDENCE → REJECT
+- If `gap_basis != premarket` or `confidence != OK` → max B_WATCH
+- If cap tier is not mid/large/mega → max B_WATCH
 - If no catalyst and no abnormal move → max B_WATCH (can't confirm emotional dislocation)
 - If gap < 3% and RVOL < 2 → REJECT (no participation, no dislocation)
 
@@ -143,8 +150,10 @@ Add to `agent_tools/definitions.py` TOOLS list:
                 "universe": {"type": ["string", "array"], "description": "Universe name(s)"},
                 "watchlist": {"type": ["string", "array"], "description": "Watchlist name(s)"},
                 "tickers": {"type": "array", "items": {"type": "string"}, "description": "Explicit ticker list"},
-                "all_universes": {"type": "boolean", "default": true},
+                "all_universes": {"type": "boolean", "default": false},
                 "market": {"type": "string", "description": "Market universe (e.g. 'active')"},
+                "market_limit": {"type": "integer", "description": "Optional smoke-test cap for market scans"},
+                "max_workers": {"type": "integer", "description": "Optional bounded worker count"},
             },
         },
     },
@@ -165,8 +174,10 @@ def scan_breitstein(
     universe: str | list[str] | None = None,
     watchlist: str | list[str] | None = None,
     tickers: list[str] | str | None = None,
-    all_universes: bool = True,
+    all_universes: bool = False,
     market: str | None = None,
+    market_limit: int | None = None,
+    max_workers: int | None = None,
     service: BreitsteinScannerService | None = None,
 ) -> dict[str, Any]:
     ...
@@ -174,6 +185,8 @@ def scan_breitstein(
 
 Follow the same pattern as `scan_small_caps()`: lazy-import the service,
 run scan, serialize results using a `_breitstein_candidate_to_dict()` helper.
+If no selection is provided, default to `watchlist="HOT_ACTIVE"` instead of
+`all_universes=true`; this keeps the Phase 1 scan focused on in-play underlyings.
 
 ### 1.5 Tests
 
@@ -197,21 +210,21 @@ Add a mid/large-cap universe to `data/universes.yaml`:
 
 ```yaml
 MID_LARGE_CAP:
-  description: "Mid, large, and mega cap US equities for mean-reversion scanning"
-  source: manual
-  tickers:
-    - AAPL
-    - MSFT
-    - GOOGL
-    - AMZN
-    - NVDA
-    - META
-    - TSLA
-    - AVGO
-    - AMD
-    - NFLX
-    # ... add other liquid mid/large-cap names
+  - AAPL
+  - MSFT
+  - GOOGL
+  - AMZN
+  - NVDA
+  - META
+  - TSLA
+  - AVGO
+  - AMD
+  - NFLX
+  # ... add other liquid mid/large-cap names
 ```
+
+Keep `data/universes.yaml` as a mapping of universe name to a plain ticker list.
+The current `UniverseService` does not support nested metadata fields.
 
 ---
 
@@ -495,16 +508,18 @@ Create `tests/test_intraday_analysis.py`:
 
 Execute in this order. Each step should compile and pass tests before moving on.
 
-1. `app/models.py` — add `BreitsteinCandidate`, `BreitsteinScanOutput`, `BreitsteinGrade`
-2. `data/scanner_presets.yaml` — add `breitstein_mean_reversion_v0` preset
-3. `services/breitstein_scanner_service.py` — implement service with grading
-4. `tests/test_breitstein_scanner.py` — write tests FIRST (TDD), then verify
-5. `agent_tools/definitions.py` — add `scan_breitstein` tool
-6. `agent_tools/tools.py` — add `scan_breitstein()` function + serializers
-7. `data/universes.yaml` — add `MID_LARGE_CAP` universe
-8. Run full test suite: `.venv/bin/python -m pytest -q`
-9. Run lint: `.venv/bin/ruff check .`
-10. Run verify: `scripts/verify.sh`
+1. `tests/test_breitstein_scanner.py` — write failing model/preset tests first
+2. `app/models.py` — add `BreitsteinCandidate`, `BreitsteinScanOutput`, `BreitsteinGrade`
+3. `data/scanner_presets.yaml` — add `breitstein_mean_reversion_v0` preset
+4. `tests/test_breitstein_scanner.py` — write failing service/tool tests
+5. `services/breitstein_scanner_service.py` — implement service with grading
+6. `agent_tools/definitions.py` — add `scan_breitstein` tool
+7. `agent_tools/tools.py` — add `scan_breitstein()` function + serializers
+8. `tests/test_universe_service.py` — write failing `MID_LARGE_CAP` assertion
+9. `data/universes.yaml` — add `MID_LARGE_CAP` universe as a plain list
+10. Run full test suite: `.venv/bin/python -m pytest -q`
+11. Run lint: `.venv/bin/ruff check .`
+12. Run verify: `scripts/verify.sh`
 
 Phase 2 (separate PR after Phase 1 is merged):
 
