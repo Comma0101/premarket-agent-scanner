@@ -5,10 +5,8 @@ All offline. Tools run against injected fake providers.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from agent_tools import definitions, tools
-from app.models import ProviderPriceData, utc_now_iso
+from app.models import HaltStatus, ProviderPriceData, utc_now_iso
 from services.scanner_service import ScannerService
 from services.snapshot_service import SnapshotService
 from services.universe_service import UniverseService
@@ -36,7 +34,7 @@ def _quote(ticker, prev, pre, cap):
         latest_price=pre,
         volume=2_000_000,
         timestamp=utc_now_iso(),
-        raw={"marketCap": cap},
+        raw={"marketCap": cap, "averageVolume": 1_000_000},
     )
 
 
@@ -66,6 +64,53 @@ def test_scan_premarket_tool_returns_json_dict():
 def test_scan_premarket_tool_validates_selection_and_direction():
     assert "error" in tools.scan_premarket()
     assert "error" in tools.scan_premarket(tickers="NVDA", direction="sideways")
+
+
+def test_get_ticker_snapshot_tool_surfaces_halt_status():
+    class FakeSnapshotService:
+        def build_snapshot(self, ticker):
+            from app.models import CombinedSnapshot
+
+            return CombinedSnapshot(
+                ticker=ticker,
+                timestamp=utc_now_iso(),
+                previous_close=100.0,
+                premarket_price=105.0,
+                latest_price=105.0,
+                open_price=None,
+                high=None,
+                low=None,
+                volume=1_000_000,
+                source_primary="fake",
+                source_secondary=None,
+                confidence="OK",
+                sources=["fake"],
+                halt_status=HaltStatus(
+                    ticker=ticker,
+                    status="HALTED",
+                    reason_code="LUDP",
+                    halt_time="07/01/2026 09:35:12",
+                    source="nasdaq_trader_halts",
+                ),
+            )
+
+    out = tools.get_ticker_snapshot(
+        ticker="ABCD",
+        snapshot_service=FakeSnapshotService(),
+    )
+
+    assert out["halt_status"] == {
+        "ticker": "ABCD",
+        "status": "HALTED",
+        "is_active": False,
+        "reason_code": "LUDP",
+        "reason": None,
+        "halt_time": "07/01/2026 09:35:12",
+        "resume_time": None,
+        "source": "nasdaq_trader_halts",
+        "fetched_at": None,
+        "error": None,
+    }
 
 
 def test_scan_small_caps_tool_returns_candidates():
@@ -125,14 +170,9 @@ def test_scan_small_caps_tool_returns_candidates():
     )
 
     assert out["candidate_count"] == 1
-    assert out["session_banner"].startswith("PRE_MARKET, Jun 28 8:00 AM ET.")
     assert out["candidates"][0]["ticker"] == "HOT"
     assert out["candidates"][0]["grade"] == "A_WATCH"
     assert out["candidates"][0]["gap_basis"] == "premarket"
-    assert out["candidates"][0]["as_of_et"] == "Jun 28 8:00 AM ET"
-    assert out["candidates"][0]["as_of_utc"] == "2026-06-28T12:00:00Z"
-    assert out["candidates"][0]["session_mode"] == "PRE_MARKET"
-    assert out["candidates"][0]["data_caveat"] is None
     assert out["candidates"][0]["missing_fields"] == ["short_interest"]
     assert out["candidates"][0]["evidence"]["float_shares"] == 8_000_000
     assert out["candidates"][0]["evidence"]["catalysts"][0]["catalyst_quality"] == "hard"
@@ -140,63 +180,6 @@ def test_scan_small_caps_tool_returns_candidates():
     assert out["candidates"][0]["evidence"]["is_low_float"] is True
     assert out["candidates"][0]["evidence"]["float_rotation"] == 2.0
     assert "short_interest" in out["candidates"][0]["evidence"]["missing_fields"]
-    assert "rejected" not in out
-    assert "rejected_count" not in out
-
-
-def test_scan_small_caps_tool_can_include_rejected_rows():
-    from app.models import SmallCapCandidate, SmallCapScanOutput
-
-    class FakeSmallCapService:
-        def scan(self, **kwargs):
-            assert kwargs["include_rejected"] is True
-            return SmallCapScanOutput(
-                preset=kwargs["preset_name"],
-                run_ids=["run1"],
-                candidate_count=0,
-                candidates=[],
-                notes=[],
-                rejected_count=1,
-                rejected=[
-                    SmallCapCandidate(
-                        ticker="BAD",
-                        name=None,
-                        market_cap=25_000_000,
-                        gap_pct=12.0,
-                        gap_dollar=0.72,
-                        gap_basis="last_trade",
-                        volume=2_000_000,
-                        rel_volume=5.0,
-                        confidence="STALE_DATA",
-                        score=0,
-                        grade="REJECT",
-                        matched_signals=["unusable_confidence"],
-                        risk_notes=["Rejected because confidence is STALE_DATA."],
-                        sources=["fake"],
-                        timestamp="2026-06-29T23:30:00Z",
-                    )
-                ],
-                zero_result_reason="all_failed_data_quality",
-                relax_suggestions=["Run during PRE_MARKET for clean gap data."],
-            )
-
-    out = tools.scan_small_caps(
-        tickers="BAD",
-        preset_name="sykes_small_cap_v0",
-        include_rejected=True,
-        service=FakeSmallCapService(),
-    )
-
-    assert out["candidate_count"] == 0
-    assert out["rejected_count"] == 1
-    assert out["rejected"][0]["ticker"] == "BAD"
-    assert out["rejected"][0]["as_of_et"] == "Jun 29 7:30 PM ET"
-    assert out["rejected"][0]["session_mode"] == "POST_MARKET"
-    assert out["rejected"][0]["data_caveat"].startswith(
-        "POST_MARKET: last_trade / STALE_DATA"
-    )
-    assert out["zero_result_reason"] == "all_failed_data_quality"
-    assert out["relax_suggestions"] == ["Run during PRE_MARKET for clean gap data."]
 
 
 def test_scan_small_caps_tool_accepts_market_selection():
@@ -227,60 +210,27 @@ def test_scan_small_caps_tool_accepts_market_selection():
     assert out["notes"] == ["market universe us-listed"]
 
 
-def test_scan_small_caps_tool_can_opt_into_live_catalyst_refresh(monkeypatch):
+def test_scan_small_caps_tool_accepts_live_intraday():
     from app.models import SmallCapScanOutput
-    from providers import news_provider as news_module
-    from services import small_cap_evidence_service as evidence_module
-    from services import small_cap_scanner_service as scanner_module
 
-    calls = {"rss": 0, "evidence": 0, "scanner": 0}
-
-    class FakeRSSNewsProvider:
-        def __init__(self):
-            calls["rss"] += 1
-
-    class FakeEvidenceService:
-        def __init__(self, news_provider):
-            calls["evidence"] += 1
-            assert isinstance(news_provider, FakeRSSNewsProvider)
-
-    class FakeScannerService:
-        def __init__(self, evidence_service):
-            calls["scanner"] += 1
-            assert isinstance(evidence_service, FakeEvidenceService)
-
+    class FakeSmallCapService:
         def scan(self, **kwargs):
+            assert kwargs["live_intraday"] is True
             return SmallCapScanOutput(
                 preset=kwargs["preset_name"],
                 run_ids=[],
                 candidate_count=0,
                 candidates=[],
-                notes=["scan note"],
+                notes=["live intraday"],
             )
 
-    monkeypatch.setattr(news_module, "RSSNewsProvider", FakeRSSNewsProvider)
-    monkeypatch.setattr(evidence_module, "SmallCapEvidenceService", FakeEvidenceService)
-    monkeypatch.setattr(scanner_module, "SmallCapScannerService", FakeScannerService)
-
-    out = tools.scan_small_caps(tickers="HOT", refresh_catalysts=True)
-
-    assert calls == {"rss": 1, "evidence": 1, "scanner": 1}
-    assert out["candidate_count"] == 0
-    assert out["notes"][0].startswith("Live catalyst RSS refresh enabled")
-
-
-def test_scan_small_caps_tool_surfaces_market_selection_errors():
-    class RaisingSmallCapService:
-        def scan(self, **kwargs):
-            raise ValueError("market universe unavailable")
-
     out = tools.scan_small_caps(
-        market="us-listed",
-        preset_name="sykes_small_cap_v0",
-        service=RaisingSmallCapService(),
+        tickers="HOT",
+        live_intraday=True,
+        service=FakeSmallCapService(),
     )
 
-    assert out == {"error": "market universe unavailable"}
+    assert out["notes"] == ["live intraday"]
 
 
 def test_list_universes_tool_shape():
@@ -295,566 +245,9 @@ def test_get_ticker_snapshot_tool():
     out = tools.get_ticker_snapshot(ticker="NVDA", snapshot_service=snap_service)
     assert out["ticker"] == "NVDA"
     assert out["gap_pct"] == 4.0
+    assert out["rel_volume"] == 2.0
+    assert out["rel_volume_basis"] == "session_volume_vs_average_daily_volume"
     assert out["confidence"] == "OK"
-    assert out["data_status"] == "live"
-    assert out["provider_failures"] == {}
-
-
-def test_get_ticker_snapshot_surfaces_provider_failures_and_data_status():
-    """Reproduces the desk live-data failure: yfinance DNS-fails, no Alpaca.
-
-    The tool must surface a structured failure so the desk can triage without
-    parsing free-text notes. No price is invented; all fields stay None.
-    """
-
-    class ErroringYF:
-        source_name = "yfinance"
-
-        def get_snapshot(self, ticker):
-            return ProviderPriceData(
-                ticker=ticker.upper(),
-                source="yfinance",
-                error="ConnectionError: DNS failure for guce.yahoo.com",
-                notes=["get_info failed: cannot resolve guce.yahoo.com"],
-            )
-
-    svc = SnapshotService(yf_provider=ErroringYF(), alpaca_provider=None)
-    out = tools.get_ticker_snapshot(ticker="MRVL", snapshot_service=svc)
-
-    assert out["confidence"] == "ERROR"
-    assert out["data_status"] == "provider_failure"
-    assert out["provider_failures"] == {
-        "yfinance": "ConnectionError: DNS failure for guce.yahoo.com",
-    }
-    # Prime directive: never invent prices.
-    assert out["previous_close"] is None
-    assert out["premarket_price"] is None
-    assert out["latest_price"] is None
-    assert out["gap_pct"] is None
-    assert out["gap_basis"] is None
-    # Existing fields preserved so callers can still inspect notes.
-    assert any("yfinance:" in note for note in out["notes"])
-
-
-def test_get_ticker_snapshot_surfaces_halt_status():
-    from app.models import HaltStatus
-
-    class FakeHaltProvider:
-        def get_halt_status(self, ticker):
-            return HaltStatus(
-                ticker=ticker,
-                status="HALTED_REGULATORY",
-                is_active=True,
-                reason_code="T1",
-                halt_time="2026-06-30T13:35:00+00:00",
-                source="fake_halts",
-            )
-
-    svc = SnapshotService(
-        yf_provider=FakePriceProvider({"HALT": _quote("HALT", 10.0, 11.0, 50_000_000)}),
-        halt_provider=FakeHaltProvider(),
-    )
-
-    out = tools.get_ticker_snapshot(ticker="HALT", snapshot_service=svc)
-
-    assert out["halt_status"]["is_active"] is True
-    assert out["halt_status"]["reason_code"] == "T1"
-
-
-def test_explain_breitstein_ticker_tool_returns_moment_view():
-    class FakeBreitsteinService:
-        def scan(self, **kwargs):
-            assert kwargs["tickers"] == "MRVL"
-            return SimpleNamespace(
-                preset=kwargs["preset_name"],
-                run_ids=["run-1"],
-                phase="1",
-                candidate_count=0,
-                candidates=[],
-                notes=["Phase 1 underlying watchlist only."],
-            )
-
-    quotes = {
-        "MRVL": ProviderPriceData(
-            ticker="MRVL",
-            source="yfinance",
-            previous_close=266.77,
-            latest_price=277.75,
-            volume=31_025_441,
-            timestamp="2026-06-29T20:00:00+00:00",
-            raw={"marketCap": 243_184_893_952, "averageVolume": 43_000_000},
-        )
-    }
-    snap_service = SnapshotService(yf_provider=FakePriceProvider(quotes))
-
-    out = tools.explain_breitstein_ticker(
-        ticker="MRVL",
-        snapshot_service=snap_service,
-        service=FakeBreitsteinService(),
-    )
-
-    assert out["ticker"] == "MRVL"
-    assert out["verdict"] == "No Phase 1 setup"
-    assert out["moment_state"] == "blocked_data_quality"
-    assert out["lance_state"]["state"] == "blocked_data_quality"
-    assert out["data_card"]["gap_basis"] == "last_trade"
-    assert out["data_card"]["confidence"] == "STALE_DATA"
-    assert any(item["label"] == "Participation" for item in out["setup_stack"])
-
-
-def test_scan_breitstein_intraday_tool_with_injected_service():
-    from app.models import IntradayBarSeries
-
-    class FakeIntradayService:
-        def fetch_bars(self, ticker, timeframe="2Min", start="", end="", limit=100):
-            return IntradayBarSeries(
-                ticker=ticker,
-                timeframe=timeframe,
-                bars=[],
-                source="fake",
-                fetched_at=utc_now_iso(),
-            )
-
-        def compute_vwap(self, series):
-            return None
-
-        def detect_entry_signal(self, series, vwap):
-            return None
-
-    out = tools.scan_breitstein_intraday(
-        tickers=["MRVL"], service=FakeIntradayService()
-    )
-
-    assert out["ticker_count"] == 1
-    assert out["signal_count"] == 0
-    assert out["signals"] == []
-    assert out["notes"]
-
-
-def test_scan_breitstein_intraday_tool_returns_signal():
-    from app.models import BreitsteinEntrySignal
-
-    class FakeIntradayServiceWithSignal:
-        def fetch_bars(self, ticker, timeframe="2Min", start="", end="", limit=100):
-            return SimpleNamespace(ticker=ticker, timeframe=timeframe, bars=[])
-
-        def compute_vwap(self, series):
-            return 108.0
-
-        def detect_entry_signal(self, series, vwap):
-            return BreitsteinEntrySignal(
-                ticker=series.ticker,
-                direction="long",
-                entry_price=109.0,
-                stop_price=106.0,
-                target_price=None,
-                prior_bar_high=108.0,
-                prior_bar_low=106.0,
-                vwap=vwap,
-                vwap_filter_passed=True,
-                volume_2x_confirmed=True,
-                consecutive_bars=-3,
-                rate_of_change=-1.0,
-                bollinger_width=2.5,
-                timestamp="2026-06-29T14:08:00Z",
-                confidence="OK",
-            )
-
-    out = tools.scan_breitstein_intraday(
-        tickers=["MRVL"], service=FakeIntradayServiceWithSignal()
-    )
-
-    assert out["signal_count"] == 1
-    assert out["signals"][0]["ticker"] == "MRVL"
-    assert out["signals"][0]["direction"] == "long"
-    assert out["signals"][0]["entry_price"] == 109.0
-    assert out["signals"][0]["stop_price"] == 106.0
-
-
-def test_scan_breitstein_intraday_tool_requires_tickers():
-    out = tools.scan_breitstein_intraday(tickers=[])
-    assert "error" in out
-
-
-def test_scan_temiz_first_red_day_tool_returns_reference_signal():
-    from app.models import FirstRedDaySignal
-
-    class FakeTemizService:
-        def detect_first_red_day(self, ticker):
-            return FirstRedDaySignal(
-                ticker=ticker,
-                consecutive_green_days=3,
-                breakdown_reference_price=13.0,
-                risk_reference_price=14.0,
-                prior_day_close=13.0,
-                hod_before_breakdown=14.0,
-                breakdown_bar_low=12.5,
-                vwap=13.4,
-                vwap_filter_passed=True,
-                timestamp="2026-06-29T14:08:00Z",
-                source="fake-bars",
-                fetched_at="2026-06-29T14:10:00Z",
-                confidence="OK",
-                notes=["reference only"],
-            )
-
-    out = tools.scan_temiz_first_red_day(
-        tickers=["HOT"], service=FakeTemizService()
-    )
-
-    assert out["ticker_count"] == 1
-    assert out["signal_count"] == 1
-    assert out["error_count"] == 0
-    assert out["signals"][0]["ticker"] == "HOT"
-    assert out["signals"][0]["breakdown_reference_price"] == 13.0
-    assert out["signals"][0]["risk_reference_price"] == 14.0
-    assert out["signals"][0]["source"] == "fake-bars"
-    assert out["notes"]
-
-
-def test_scan_temiz_first_red_day_tool_surfaces_ticker_errors():
-    class RaisingTemizService:
-        def detect_first_red_day(self, ticker):
-            raise RuntimeError("bars unavailable")
-
-    out = tools.scan_temiz_first_red_day(
-        tickers=["HOT"], service=RaisingTemizService()
-    )
-
-    assert out["signal_count"] == 0
-    assert out["error_count"] == 1
-    assert out["errors"][0]["ticker"] == "HOT"
-    assert out["errors"][0]["confidence"] == "ERROR"
-    assert out["errors"][0]["missing_fields"] == ["bar_data"]
-    assert "bars unavailable" in out["errors"][0]["error"]
-
-
-def test_scan_temiz_first_red_day_tool_requires_tickers():
-    out = tools.scan_temiz_first_red_day(tickers=[])
-    assert "error" in out
-
-
-def test_scan_grittani_morning_panic_tool_returns_reference_signal():
-    from app.models import GrittaniPanicSignal
-
-    class FakeGrittaniService:
-        def detect_morning_panic(self, ticker, rvol=None):
-            assert rvol == 6.5
-            return GrittaniPanicSignal(
-                ticker=ticker,
-                multi_day_run_pct=200.0,
-                intraday_drop_pct=40.0,
-                panic_high=20.0,
-                panic_low=12.0,
-                bounce_reference_price=13.0,
-                risk_reference_price=12.0,
-                prior_day_close=15.0,
-                vwap=14.2,
-                rvol=rvol,
-                timestamp="2026-06-29T13:38:00Z",
-                source="fake-bars",
-                fetched_at="2026-06-29T14:10:00Z",
-                confidence="OK",
-                notes=["reference only"],
-            )
-
-    out = tools.scan_grittani_morning_panic(
-        tickers=["HOT"],
-        rvol_by_ticker={"HOT": 6.5},
-        service=FakeGrittaniService(),
-    )
-
-    assert out["ticker_count"] == 1
-    assert out["signal_count"] == 1
-    assert out["error_count"] == 0
-    assert out["signals"][0]["ticker"] == "HOT"
-    assert out["signals"][0]["bounce_reference_price"] == 13.0
-    assert out["signals"][0]["risk_reference_price"] == 12.0
-    assert out["signals"][0]["rvol"] == 6.5
-    assert out["signals"][0]["source"] == "fake-bars"
-    assert out["notes"]
-
-
-def test_scan_grittani_morning_panic_tool_surfaces_ticker_errors():
-    class RaisingGrittaniService:
-        def detect_morning_panic(self, ticker, rvol=None):
-            raise RuntimeError("bars unavailable")
-
-    out = tools.scan_grittani_morning_panic(
-        tickers=["HOT"],
-        rvol_by_ticker={"HOT": 6.5},
-        service=RaisingGrittaniService(),
-    )
-
-    assert out["signal_count"] == 0
-    assert out["error_count"] == 1
-    assert out["errors"][0]["ticker"] == "HOT"
-    assert out["errors"][0]["confidence"] == "ERROR"
-    assert out["errors"][0]["missing_fields"] == ["bar_data"]
-    assert "bars unavailable" in out["errors"][0]["error"]
-
-
-def test_scan_grittani_morning_panic_tool_requires_tickers():
-    out = tools.scan_grittani_morning_panic(tickers=[])
-    assert "error" in out
-
-
-def test_get_trader_context_tool_with_injected_service():
-    class FakeTraderContextService:
-        def build_context(self, **kwargs):
-            assert kwargs["ticker"] == "HOT"
-            assert kwargs["trader_profile"] == "timothy_sykes"
-            assert kwargs["include_intraday"] is True
-            assert kwargs["include_daily"] is True
-            assert kwargs["refresh_catalysts"] is False
-            return {
-                "ticker": "HOT",
-                "trader_profile": "timothy_sykes",
-                "snapshot": {"confidence": "OK"},
-                "missing_fields": [],
-            }
-
-    out = tools.get_trader_context(
-        ticker="HOT",
-        trader_profile="timothy_sykes",
-        include_intraday=True,
-        include_daily=True,
-        service=FakeTraderContextService(),
-    )
-
-    assert out["ticker"] == "HOT"
-    assert out["snapshot"]["confidence"] == "OK"
-
-
-def test_explain_ticker_as_trader_tool_formats_context_packet():
-    class FakeTraderContextService:
-        def build_context(self, **kwargs):
-            assert kwargs["ticker"] == "HOT"
-            assert kwargs["trader_profile"] == "timothy_sykes"
-            assert kwargs["include_intraday"] is True
-            assert kwargs["include_daily"] is False
-            assert kwargs["refresh_catalysts"] is False
-            return {
-                "ticker": "HOT",
-                "trader_profile": "timothy_sykes",
-                "snapshot": {
-                    "ticker": "HOT",
-                    "previous_close": 10.0,
-                    "premarket_price": 11.2,
-                    "latest_price": 11.2,
-                    "gap_pct": 12.0,
-                    "gap_dollar": 1.2,
-                    "gap_basis": "premarket",
-                    "market_cap": 75_000_000.0,
-                    "volume": 2_000_000.0,
-                    "rel_volume": 4.5,
-                    "confidence": "OK",
-                    "sources": ["fake"],
-                    "timestamp": "2026-06-29T13:30:00Z",
-                },
-                "evidence": {
-                    "float_shares": 5_000_000.0,
-                    "is_low_float": True,
-                    "catalysts": [{"headline": "HOT wins supply deal"}],
-                    "filings": [],
-                    "missing_fields": ["short_interest"],
-                },
-                "technicals": {"intraday": None, "daily": None},
-                "missing_fields": ["short_interest", "intraday_bars"],
-                "sources": ["fake"],
-                "notes": [],
-            }
-
-    out = tools.explain_ticker_as_trader(
-        ticker="HOT",
-        trader_profile="timothy_sykes",
-        include_intraday=True,
-        service=FakeTraderContextService(),
-    )
-
-    assert out["ticker"] == "HOT"
-    assert out["trader"] == "timothy_sykes"
-    assert out["verdict"] == "Context ready"
-    assert out["data_card"]["gap_basis"] == "premarket"
-    assert out["disclaimer"].startswith("Matches your filter")
-
-
-def test_explain_ticker_as_trader_tool_requires_ticker():
-    out = tools.explain_ticker_as_trader(ticker="")
-    assert "error" in out
-
-
-def test_run_desk_tool_returns_aggregated_views():
-    class FakeDeskRunService:
-        def run(self, **kwargs):
-            assert kwargs["tickers"] == ["MRVL", "HOOD"]
-            assert kwargs["universe"] is None
-            assert kwargs["watchlist"] is None
-            assert kwargs["market"] is None
-            assert kwargs["all_universes"] is False
-            assert kwargs["trader_profiles"] == ["lance_breitstein"]
-            assert kwargs["include_intraday"] is True
-            assert kwargs["include_daily"] is False
-            assert kwargs["refresh_catalysts"] is False
-            return {
-                "ticker_count": 2,
-                "trader_profiles": ["lance_breitstein"],
-                "tickers": [
-                    {
-                        "ticker": "MRVL",
-                        "data_quality": {
-                            "gap_basis": "last_trade",
-                            "confidence": "STALE_DATA",
-                            "as_of": "2026-06-29T20:00:00Z",
-                            "sources": ["fake"],
-                        },
-                        "views": {"lance_breitstein": {"ticker": "MRVL"}},
-                        "errors": [],
-                    }
-                ],
-                "disclaimer": "Matches your filter — not buy/sell advice. Verify before acting.",
-            }
-
-    out = tools.run_desk(
-        tickers="MRVL, HOOD",
-        trader_profiles=["lance_breitstein"],
-        include_intraday=True,
-        service=FakeDeskRunService(),
-    )
-
-    assert out["ticker_count"] == 2
-    assert out["trader_profiles"] == ["lance_breitstein"]
-    assert out["tickers"][0]["ticker"] == "MRVL"
-
-
-def test_run_desk_tool_accepts_watchlist_selection():
-    class FakeDeskRunService:
-        def run(self, **kwargs):
-            assert kwargs["tickers"] is None
-            assert kwargs["watchlist"] == "ACTIVE"
-            return {
-                "ticker_count": 1,
-                "selection": {"source": "universe_service", "label": "WATCHLIST:ACTIVE"},
-                "tickers": [],
-                "trader_profiles": ["timothy_sykes"],
-                "disclaimer": "Matches your filter — not buy/sell advice. Verify before acting.",
-            }
-
-    out = tools.run_desk(watchlist="ACTIVE", service=FakeDeskRunService())
-
-    assert out["selection"]["label"] == "WATCHLIST:ACTIVE"
-
-
-def test_run_desk_tool_requires_selection():
-    out = tools.run_desk()
-    assert "error" in out
-
-
-def test_run_morning_brief_tool_returns_packet():
-    class FakeMorningBriefService:
-        def run(self, **kwargs):
-            assert kwargs["profile"] == "tim_grittani"
-            assert kwargs["market"] == "us-listed"
-            assert kwargs["market_limit"] == 25
-            assert kwargs["save_journal"] is False
-            return {
-                "agent_name": "premarket_desk",
-                "strategy": "tim_grittani",
-                "status": "OK",
-                "brief_summary": "1 primary.",
-                "watchlist": {"primary_watch": [], "monitoring": []},
-            }
-
-    out = tools.run_morning_brief(
-        profile="tim_grittani",
-        market="us-listed",
-        market_limit=25,
-        save_journal=False,
-        service=FakeMorningBriefService(),
-    )
-
-    assert out["agent_name"] == "premarket_desk"
-    assert out["strategy"] == "tim_grittani"
-    assert out["brief_summary"] == "1 primary."
-
-
-def test_run_morning_brief_tool_requires_selection():
-    out = tools.run_morning_brief()
-    assert "error" in out
-
-
-def test_deep_dive_ticker_tool_returns_packet():
-    class FakeDeepDiveService:
-        def run(self, **kwargs):
-            assert kwargs["ticker"] == "HOT"
-            assert kwargs["trader_profile"] == "alex_temiz"
-            assert kwargs["include_intraday"] is True
-            assert kwargs["include_daily"] is True
-            assert kwargs["refresh_catalysts"] is False
-            return {
-                "ticker": "HOT",
-                "status": "OK",
-                "snapshot": {"confidence": "OK"},
-                "scanner_results": {"temiz_first_red_day": {"triggered": False}},
-                "disclaimer": "Matches your filter — not buy/sell advice. Verify before acting.",
-            }
-
-    out = tools.deep_dive_ticker(
-        ticker="HOT",
-        trader_profile="alex_temiz",
-        include_intraday=True,
-        include_daily=True,
-        service=FakeDeepDiveService(),
-    )
-
-    assert out["ticker"] == "HOT"
-    assert out["status"] == "OK"
-    assert out["snapshot"]["confidence"] == "OK"
-
-
-def test_deep_dive_ticker_tool_requires_ticker():
-    out = tools.deep_dive_ticker(ticker="")
-    assert "error" in out
-
-
-def test_get_trader_context_tool_requires_ticker():
-    out = tools.get_trader_context(ticker="")
-    assert "error" in out
-
-
-def test_get_trader_context_tool_wires_bar_provider_for_technicals(monkeypatch):
-    from providers import alpaca_provider as alpaca_module
-    from services import trader_context_service as context_module
-
-    calls = {"alpaca": 0, "context": 0}
-
-    class FakeAlpacaProvider:
-        def __init__(self):
-            calls["alpaca"] += 1
-
-    class FakeTraderContextService:
-        def __init__(self, bar_provider=None):
-            calls["context"] += 1
-            assert isinstance(bar_provider, FakeAlpacaProvider)
-
-        def build_context(self, **kwargs):
-            return {
-                "ticker": kwargs["ticker"],
-                "technicals": {"intraday": None, "daily": None},
-                "missing_fields": ["intraday_bars", "daily_bars"],
-            }
-
-    monkeypatch.setattr(alpaca_module, "AlpacaProvider", FakeAlpacaProvider)
-    monkeypatch.setattr(context_module, "TraderContextService", FakeTraderContextService)
-
-    out = tools.get_trader_context(
-        ticker="HOT",
-        include_intraday=True,
-        include_daily=True,
-    )
-
-    assert calls == {"alpaca": 1, "context": 1}
-    assert out["ticker"] == "HOT"
 
 
 def test_get_ticker_snapshot_uses_configured_providers(monkeypatch):
@@ -872,6 +265,35 @@ def test_get_ticker_snapshot_uses_configured_providers(monkeypatch):
     out = tools.get_ticker_snapshot(ticker="NVDA")  # no injected service -> default path
     assert calls["n"] == 1
     assert out["gap_pct"] == 4.0
+
+
+def test_get_ticker_snapshot_surfaces_data_status_and_provider_failures():
+    yf = ProviderPriceData(
+        ticker="NVDA",
+        source="yfinance",
+        notes=["Failed to fetch yfinance quote: DNS failure"],
+        error="DNS failure",
+    )
+    alpaca = ProviderPriceData(
+        ticker="NVDA",
+        source="alpaca",
+        notes=["Alpaca latest trade unavailable: DNS failure"],
+        error="no_usable_alpaca_snapshot",
+    )
+    snap_service = SnapshotService(
+        yf_provider=FakePriceProvider({"NVDA": yf}),
+        alpaca_provider=FakePriceProvider({"NVDA": alpaca}),
+    )
+
+    out = tools.get_ticker_snapshot(ticker="NVDA", snapshot_service=snap_service)
+
+    assert out["confidence"] == "ERROR"
+    assert out["data_status"] == "provider_failure"
+    assert out["provider_failures"] == {
+        "yfinance": "DNS failure",
+        "alpaca": "no_usable_alpaca_snapshot",
+    }
+    assert out["sources"] == []
 
 
 def test_dispatch_unknown_tool():
@@ -917,23 +339,1015 @@ def test_dispatch_logging_closes_connection(monkeypatch):
     assert logged[0]["user_query"] == "what lists exist?"
 
 
+def test_scan_breitstein_intraday_tool_with_injected_service():
+    from app.models import IntradayBarSeries
+
+    class FakeIntradayService:
+        def fetch_bars(self, ticker, timeframe="2Min", start="", end="", limit=100):
+            return IntradayBarSeries(
+                ticker=ticker, timeframe="2Min", bars=[], source="fake", fetched_at=utc_now_iso()
+            )
+
+        def compute_vwap(self, series):
+            return None
+
+        def detect_entry_signal(self, series, vwap):
+            return None
+
+    out = tools.scan_breitstein_intraday(
+        tickers=["AAPL"], service=FakeIntradayService()
+    )
+    assert out["ticker_count"] == 1
+    assert out["signal_count"] == 0
+    assert out["signals"] == []
+
+
+def test_scan_breitstein_intraday_tool_returns_signal():
+    from app.models import BreitsteinEntrySignal
+    from tests.test_intraday_analysis import _make_series
+
+    class FakeIntradayServiceWithSignal:
+        def fetch_bars(self, ticker, timeframe="2Min", start="", end="", limit=100):
+            return _make_series(ticker, [
+                (110, 111, 109, 110, 1000),
+                (109, 110, 108, 109, 1000),
+                (108, 109, 107, 108, 1000),
+                (107, 108, 106, 107, 1000),
+                (108, 110, 107, 109, 2000),
+            ])
+
+        def compute_vwap(self, series):
+            return 108.0
+
+        def detect_entry_signal(self, series, vwap):
+            return BreitsteinEntrySignal(
+                ticker="AAPL",
+                direction="long",
+                entry_price=109,
+                stop_price=106,
+                target_price=None,
+                prior_bar_high=108,
+                prior_bar_low=106,
+                vwap=108.0,
+                vwap_filter_passed=True,
+                volume_2x_confirmed=True,
+                consecutive_bars=-3,
+                rate_of_change=-1.0,
+                bollinger_width=2.5,
+                timestamp="2026-06-29T14:08:00Z",
+                confidence="OK",
+            )
+
+    out = tools.scan_breitstein_intraday(
+        tickers=["AAPL"], service=FakeIntradayServiceWithSignal()
+    )
+    assert out["signal_count"] == 1
+    assert out["signals"][0]["ticker"] == "AAPL"
+    assert out["signals"][0]["direction"] == "long"
+    assert out["signals"][0]["entry_price"] == 109
+    assert out["signals"][0]["stop_price"] == 106
+
+
+def test_scan_breitstein_intraday_tool_requires_tickers():
+    out = tools.scan_breitstein_intraday(tickers=[])
+    assert "error" in out
+
+
+def test_build_lance_intraday_plan_tool_with_injected_service():
+    class FakeLancePlanService:
+        def build_plan(self, ticker):
+            return {
+                "ticker": ticker,
+                "trader": "lance_breitstein",
+                "state": "watching",
+                "data_quality": {"confidence": "OK"},
+            }
+
+    out = tools.build_lance_intraday_plan(
+        ticker="IBM",
+        service=FakeLancePlanService(),
+    )
+
+    assert out["ticker"] == "IBM"
+    assert out["trader"] == "lance_breitstein"
+    assert out["state"] == "watching"
+
+
+def test_build_lance_intraday_plan_tool_requires_ticker():
+    out = tools.build_lance_intraday_plan(ticker="")
+    assert "error" in out
+
+
+def test_build_lance_swing_plan_tool_with_injected_service():
+    class FakeLanceSwingPlanService:
+        def build(self, **kwargs):
+            assert kwargs["tickers"] == ["IBM", "MRVL"]
+            assert kwargs["lookback_days"] == 40
+            return {
+                "agent_name": "lance_swing",
+                "strategy": "Lance Breitstein daily/swing planning",
+                "plans": [{"ticker": "IBM", "state": "active_watch"}],
+            }
+
+    out = tools.build_lance_swing_plan(
+        tickers=["IBM", "MRVL"],
+        lookback_days=40,
+        service=FakeLanceSwingPlanService(),
+    )
+
+    assert out["agent_name"] == "lance_swing"
+    assert out["plans"][0]["ticker"] == "IBM"
+    assert out["plans"][0]["state"] == "active_watch"
+
+
+def test_build_lance_swing_plan_tool_requires_tickers():
+    out = tools.build_lance_swing_plan(tickers=[])
+    assert "error" in out
+
+
+def test_build_lance_swing_plan_tool_resolves_universe_and_watchlist():
+    from services.universe_service import UniverseSelection
+
+    class FakeUniverseService:
+        def resolve_selection(self, **kwargs):
+            assert kwargs == {
+                "tickers": None,
+                "universe": "AI_SEMIS_MEMORY",
+                "watchlist": "HOT_ACTIVE",
+                "all_universes": False,
+            }
+            return UniverseSelection(
+                tickers=["MU", "HOOD"],
+                memberships={"MU": ["AI_SEMIS_MEMORY"], "HOOD": ["WATCHLIST:HOT_ACTIVE"]},
+                label="AI_SEMIS_MEMORY,WATCHLIST:HOT_ACTIVE",
+            )
+
+    class FakeLanceSwingPlanService:
+        def build(self, **kwargs):
+            assert kwargs["tickers"] == ["MU", "HOOD"]
+            assert kwargs["lookback_days"] == 60
+            return {
+                "agent_name": "lance_swing",
+                "plans": [{"ticker": "MU", "state": "mean_reversion_watch"}],
+            }
+
+    out = tools.build_lance_swing_plan(
+        tickers=None,
+        universe="AI_SEMIS_MEMORY",
+        watchlist="HOT_ACTIVE",
+        service=FakeLanceSwingPlanService(),
+        universe_service=FakeUniverseService(),
+    )
+
+    assert out["selection"] == "AI_SEMIS_MEMORY,WATCHLIST:HOT_ACTIVE"
+    assert out["selection_count"] == 2
+    assert out["plans"][0]["state"] == "mean_reversion_watch"
+
+
+def test_run_lance_swing_cycle_tool_with_injected_service():
+    class FakeLanceSwingCycleService:
+        def run(self, **kwargs):
+            assert kwargs == {
+                "tickers": None,
+                "universe": "AI_SEMIS_MEMORY",
+                "watchlist": "HOT_ACTIVE",
+                "all_universes": False,
+                "lookback_days": 60,
+                "persist": True,
+                "session_id": "session-1",
+                "summary_limit": 5,
+            }
+            return {
+                "agent_name": "lance_swing",
+                "mode": "swing_cycle",
+                "session_id": "session-1",
+                "top_watchlist": [{"ticker": "MU", "state": "mean_reversion_watch"}],
+            }
+
+    out = tools.run_lance_swing_cycle(
+        universe="AI_SEMIS_MEMORY",
+        watchlist="HOT_ACTIVE",
+        persist=True,
+        session_id="session-1",
+        summary_limit=5,
+        service=FakeLanceSwingCycleService(),
+    )
+
+    assert out["agent_name"] == "lance_swing"
+    assert out["mode"] == "swing_cycle"
+    assert out["top_watchlist"][0]["ticker"] == "MU"
+
+
+def test_run_lance_full_cycle_tool_with_injected_service():
+    class FakeLanceFullCycleService:
+        def run(self, **kwargs):
+            assert kwargs == {
+                "tickers": None,
+                "universe": "AI_SEMIS_MEMORY",
+                "watchlist": "HOT_ACTIVE",
+                "all_universes": False,
+                "market": None,
+                "market_limit": None,
+                "min_gap_abs": 2.5,
+                "max_candidates": 7,
+                "persist": True,
+                "session_id": "2026-07-02-lance-intraday",
+                "swing_session_id": "2026-07-02-lance-swing",
+                "max_workers": 3,
+                "include_caveated_context": None,
+                "lookback_days": 80,
+                "update_limit": 9,
+                "review_limit": 11,
+                "target_session_date": "2026-07-03",
+                "summary_limit": 4,
+            }
+            return {
+                "agent_name": "lance_full_cycle",
+                "mode": "full_cycle",
+                "status": "OK",
+                "combined_watchlist": [{"ticker": "IBM", "lanes": ["intraday", "swing"]}],
+            }
+
+    out = tools.run_lance_full_cycle(
+        universe="AI_SEMIS_MEMORY",
+        watchlist="HOT_ACTIVE",
+        min_gap_abs=2.5,
+        max_candidates=7,
+        persist=True,
+        session_id="2026-07-02-lance-intraday",
+        swing_session_id="2026-07-02-lance-swing",
+        max_workers=3,
+        lookback_days=80,
+        update_limit=9,
+        review_limit=11,
+        target_session_date="2026-07-03",
+        summary_limit=4,
+        service=FakeLanceFullCycleService(),
+    )
+
+    assert out["agent_name"] == "lance_full_cycle"
+    assert out["mode"] == "full_cycle"
+    assert out["combined_watchlist"][0]["ticker"] == "IBM"
+
+
+def test_run_sykes_live_tool_with_injected_service():
+    class FakeSykesLiveService:
+        def run(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 100
+            assert kwargs["live_intraday"] is True
+            return {"agent_name": "timothy_sykes", "mode": "live_and_swing"}
+
+    out = tools.run_sykes_live(
+        market="us-listed",
+        market_limit=100,
+        service=FakeSykesLiveService(),
+    )
+
+    assert out["agent_name"] == "timothy_sykes"
+    assert out["mode"] == "live_and_swing"
+
+
+def test_run_trading_desk_tool_with_injected_service():
+    class FakeTradingDeskService:
+        def run(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 100
+            assert kwargs["max_workers"] == 5
+            return {"agent_name": "trading_desk", "mode": "one_run"}
+
+    out = tools.run_trading_desk(
+        market="us-listed",
+        market_limit=100,
+        max_workers=5,
+        service=FakeTradingDeskService(),
+    )
+
+    assert out["agent_name"] == "trading_desk"
+    assert out["mode"] == "one_run"
+
+
+def test_run_lance_full_cycle_tool_accepts_market_selector():
+    class FakeLanceFullCycleService:
+        def run(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 600
+            assert kwargs["all_universes"] is False
+            return {"mode": "full_cycle", "market": kwargs["market"]}
+
+    out = tools.run_lance_full_cycle(
+        market="us-listed",
+        market_limit=600,
+        service=FakeLanceFullCycleService(),
+    )
+
+    assert out["mode"] == "full_cycle"
+    assert out["market"] == "us-listed"
+
+
+def test_run_lance_full_cycle_tool_defaults_to_bounded_parallel_workers():
+    class FakeLanceFullCycleService:
+        def run(self, **kwargs):
+            return {"max_workers": kwargs["max_workers"]}
+
+    out = tools.run_lance_full_cycle(service=FakeLanceFullCycleService())
+
+    assert out["max_workers"] == 6
+
+
+def test_review_lance_full_cycle_tool_with_injected_service():
+    class FakeFullCycleReviewService:
+        def review(self, **kwargs):
+            assert kwargs == {
+                "intraday_session_id": "2026-07-02-lance-intraday",
+                "swing_session_id": "2026-07-02-lance-swing",
+                "limit": 25,
+            }
+            return {
+                "agent_name": "lance_full_cycle",
+                "mode": "full_cycle_review",
+                "journal_queue": [{"lane": "intraday", "ticker": "IBM"}],
+            }
+
+    out = tools.review_lance_full_cycle(
+        intraday_session_id="2026-07-02-lance-intraday",
+        swing_session_id="2026-07-02-lance-swing",
+        limit=25,
+        service=FakeFullCycleReviewService(),
+    )
+
+    assert out["mode"] == "full_cycle_review"
+    assert out["journal_queue"][0]["ticker"] == "IBM"
+
+
+def test_journal_lance_full_cycle_outcome_tool_with_injected_service():
+    class FakeFullCycleReviewService:
+        def record_outcome(self, **kwargs):
+            assert kwargs == {
+                "lane": "swing",
+                "session_id": "2026-07-02-lance-swing",
+                "ticker": "MU",
+                "playbook": "swing_mean_reversion_reclaim",
+                "outcome": "chop",
+                "notes": "Manual review.",
+                "plan": {"ticker": "MU"},
+            }
+            return {
+                "agent_name": "lance_full_cycle",
+                "mode": "full_cycle_journal",
+                "lane": "swing",
+                "journal": {"recorded": {"ticker": "MU", "outcome": "chop"}},
+            }
+
+    out = tools.journal_lance_full_cycle_outcome(
+        lane="swing",
+        session_id="2026-07-02-lance-swing",
+        ticker="MU",
+        playbook="swing_mean_reversion_reclaim",
+        outcome="chop",
+        notes="Manual review.",
+        plan={"ticker": "MU"},
+        service=FakeFullCycleReviewService(),
+    )
+
+    assert out["mode"] == "full_cycle_journal"
+    assert out["journal"]["recorded"]["outcome"] == "chop"
+
+
+def test_get_lance_session_dashboard_tool_with_injected_service():
+    class FakeDashboardService:
+        def dashboard(self, **kwargs):
+            assert kwargs == {
+                "intraday_session_id": "2026-07-02-lance-intraday",
+                "swing_session_id": "2026-07-02-lance-swing",
+                "target_session_date": "2026-07-03",
+                "limit": 25,
+                "memory_limit": 50,
+            }
+            return {
+                "agent_name": "lance_full_cycle",
+                "mode": "session_dashboard",
+                "status": "OK",
+                "buckets": {"needs_manual_review": [{"ticker": "IBM"}]},
+            }
+
+    out = tools.get_lance_session_dashboard(
+        intraday_session_id="2026-07-02-lance-intraday",
+        swing_session_id="2026-07-02-lance-swing",
+        target_session_date="2026-07-03",
+        limit=25,
+        memory_limit=50,
+        service=FakeDashboardService(),
+    )
+
+    assert out["mode"] == "session_dashboard"
+    assert out["buckets"]["needs_manual_review"][0]["ticker"] == "IBM"
+
+
+def test_build_lance_tomorrow_prep_tool_with_injected_service():
+    class FakeDashboardService:
+        def tomorrow_prep(self, **kwargs):
+            assert kwargs == {
+                "intraday_session_id": "2026-07-02-lance-intraday",
+                "swing_session_id": "2026-07-02-lance-swing",
+                "target_session_date": "2026-07-03",
+                "limit": 25,
+                "memory_limit": 50,
+            }
+            return {
+                "agent_name": "lance_full_cycle",
+                "mode": "tomorrow_prep",
+                "watchlist": [{"ticker": "MU"}],
+            }
+
+    out = tools.build_lance_tomorrow_prep(
+        intraday_session_id="2026-07-02-lance-intraday",
+        swing_session_id="2026-07-02-lance-swing",
+        target_session_date="2026-07-03",
+        limit=25,
+        memory_limit=50,
+        service=FakeDashboardService(),
+    )
+
+    assert out["mode"] == "tomorrow_prep"
+    assert out["watchlist"][0]["ticker"] == "MU"
+
+
+def test_build_lance_unified_plan_tool_with_injected_service():
+    class FakeLanceUnifiedPlanService:
+        def build(self, **kwargs):
+            assert kwargs["tickers"] == ["IBM", "MRVL"]
+            assert kwargs["lookback_days"] == 50
+            return {
+                "agent_name": "lance_unified",
+                "plans": [{"ticker": "IBM", "action_mode": "watch"}],
+            }
+
+    out = tools.build_lance_unified_plan(
+        tickers=["IBM", "MRVL"],
+        lookback_days=50,
+        service=FakeLanceUnifiedPlanService(),
+    )
+
+    assert out["agent_name"] == "lance_unified"
+    assert out["plans"][0]["ticker"] == "IBM"
+    assert out["plans"][0]["action_mode"] == "watch"
+
+
+def test_build_lance_unified_plan_tool_requires_tickers():
+    out = tools.build_lance_unified_plan(tickers=[])
+    assert "error" in out
+
+
+def test_run_lance_market_scan_tool_with_injected_service():
+    class FakeLanceMarketScanService:
+        def scan(self, **kwargs):
+            assert kwargs["tickers"] == ["IBM", "MRVL"]
+            assert kwargs["max_candidates"] == 2
+            assert kwargs["persist"] is True
+            return {
+                "agent_name": "lance_intraday",
+                "session_id": "session-1",
+                "candidate_count": 1,
+                "watchlist": [{"ticker": "IBM", "state": "setup_forming", "score": 90}],
+            }
+
+    out = tools.run_lance_market_scan(
+        tickers=["IBM", "MRVL"],
+        max_candidates=2,
+        persist=True,
+        service=FakeLanceMarketScanService(),
+    )
+
+    assert out["agent_name"] == "lance_intraday"
+    assert out["session_id"] == "session-1"
+    assert out["watchlist"][0]["ticker"] == "IBM"
+
+
+def test_run_lance_market_scan_tool_accepts_market_selector():
+    class FakeLanceMarketScanService:
+        def scan(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 750
+            assert kwargs["all_universes"] is False
+            return {"agent_name": "lance_intraday", "selection": "us-listed"}
+
+    out = tools.run_lance_market_scan(
+        market="us-listed",
+        market_limit=750,
+        service=FakeLanceMarketScanService(),
+    )
+
+    assert out["agent_name"] == "lance_intraday"
+    assert out["selection"] == "us-listed"
+
+
+def test_update_lance_watchlist_tool_with_injected_service():
+    class FakeLanceDeskUpdateService:
+        def update(self, **kwargs):
+            assert kwargs["session_id"] == "session-1"
+            assert kwargs["limit"] == 3
+            assert kwargs["persist"] is True
+            return {
+                "agent_name": "lance_intraday",
+                "session_id": "session-1",
+                "updated_count": 1,
+                "updates": [{"ticker": "IBM", "current_state": "triggered_reference"}],
+            }
+
+    out = tools.update_lance_watchlist(
+        session_id="session-1",
+        limit=3,
+        persist=True,
+        service=FakeLanceDeskUpdateService(),
+    )
+
+    assert out["agent_name"] == "lance_intraday"
+    assert out["updated_count"] == 1
+    assert out["updates"][0]["ticker"] == "IBM"
+
+
+def test_run_advanced_lance_scan_tool_with_injected_service():
+    class FakeAdvancedLanceService:
+        def scan(self, **kwargs):
+            assert kwargs["universe"] == "AI_SEMIS_MEMORY"
+            assert kwargs["max_candidates"] == 5
+            return {
+                "agent_name": "lance_intraday",
+                "mode": "advanced",
+                "watchlist": [{"ticker": "NVDA"}],
+            }
+
+    out = tools.run_advanced_lance_scan(
+        universe="AI_SEMIS_MEMORY",
+        max_candidates=5,
+        service=FakeAdvancedLanceService(),
+    )
+
+    assert out["mode"] == "advanced"
+    assert out["watchlist"][0]["ticker"] == "NVDA"
+
+
+def test_run_advanced_lance_scan_tool_accepts_market_selector():
+    class FakeAdvancedLanceService:
+        def scan(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 500
+            assert kwargs["all_universes"] is False
+            return {"mode": "advanced", "selection": "us-listed"}
+
+    out = tools.run_advanced_lance_scan(
+        market="us-listed",
+        market_limit=500,
+        service=FakeAdvancedLanceService(),
+    )
+
+    assert out["mode"] == "advanced"
+    assert out["selection"] == "us-listed"
+
+
+def test_journal_lance_outcome_tool_with_injected_service():
+    class FakeJournalService:
+        def record(self, **kwargs):
+            assert kwargs["ticker"] == "NVDA"
+            assert kwargs["outcome"] == "worked"
+            return {"status": "OK", "recorded": {"ticker": "NVDA", "outcome": "worked"}}
+
+    out = tools.journal_lance_outcome(
+        session_id="session-1",
+        ticker="NVDA",
+        playbook="earnings_continuation",
+        outcome="worked",
+        service=FakeJournalService(),
+    )
+
+    assert out["status"] == "OK"
+    assert out["recorded"]["outcome"] == "worked"
+
+
+def test_get_lance_session_timeline_tool_with_injected_service():
+    class FakeTimelineService:
+        def timeline(self, **kwargs):
+            assert kwargs["session_id"] == "session-1"
+            assert kwargs["ticker"] == "NVDA"
+            assert kwargs["limit"] == 10
+            return {
+                "agent_name": "lance_intraday",
+                "session_id": "session-1",
+                "event_count": 2,
+                "tickers": [{"ticker": "NVDA", "latest_state": "setup_forming"}],
+            }
+
+    out = tools.get_lance_session_timeline(
+        session_id="session-1",
+        ticker="NVDA",
+        limit=10,
+        service=FakeTimelineService(),
+    )
+
+    assert out["event_count"] == 2
+    assert out["tickers"][0]["latest_state"] == "setup_forming"
+
+
+def test_review_lance_session_tool_with_injected_service():
+    class FakeReviewService:
+        def review(self, **kwargs):
+            assert kwargs["session_id"] == "session-1"
+            assert kwargs["limit"] == 20
+            return {
+                "agent_name": "lance_intraday",
+                "session_id": "session-1",
+                "pending_count": 1,
+                "pending_reviews": [{"ticker": "OPEN", "suggested_outcome": "unknown"}],
+            }
+
+    out = tools.review_lance_session(
+        session_id="session-1",
+        limit=20,
+        service=FakeReviewService(),
+    )
+
+    assert out["pending_count"] == 1
+    assert out["pending_reviews"][0]["ticker"] == "OPEN"
+
+
+def test_build_lance_carryover_plan_tool_with_injected_service():
+    class FakeCarryoverService:
+        def build(self, **kwargs):
+            assert kwargs["session_id"] == "session-1"
+            assert kwargs["target_session_date"] == "2026-07-02"
+            assert kwargs["limit"] == 20
+            return {
+                "agent_name": "lance_intraday",
+                "source_session_id": "session-1",
+                "target_session_date": "2026-07-02",
+                "carryover_count": 1,
+                "groups": {"strength_carryover": [{"ticker": "OPEN"}]},
+            }
+
+    out = tools.build_lance_carryover_plan(
+        session_id="session-1",
+        target_session_date="2026-07-02",
+        limit=20,
+        service=FakeCarryoverService(),
+    )
+
+    assert out["carryover_count"] == 1
+    assert out["groups"]["strength_carryover"][0]["ticker"] == "OPEN"
+
+
+def test_run_lance_desk_cycle_tool_with_injected_service():
+    class FakeDeskCycleService:
+        def run(self, **kwargs):
+            assert kwargs["tickers"] == ["IBM", "MRVL"]
+            assert kwargs["max_candidates"] == 2
+            assert kwargs["target_session_date"] == "2026-07-02"
+            return {
+                "agent_name": "lance_intraday",
+                "mode": "desk_cycle",
+                "session_id": "session-1",
+                "status": "OK",
+                "scan_summary": {"candidate_count": 2},
+            }
+
+    out = tools.run_lance_desk_cycle(
+        tickers=["IBM", "MRVL"],
+        max_candidates=2,
+        target_session_date="2026-07-02",
+        service=FakeDeskCycleService(),
+    )
+
+    assert out["mode"] == "desk_cycle"
+    assert out["session_id"] == "session-1"
+    assert out["scan_summary"]["candidate_count"] == 2
+
+
+def test_run_lance_desk_cycle_tool_accepts_market_selector():
+    class FakeDeskCycleService:
+        def run(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 500
+            assert kwargs["all_universes"] is False
+            return {"mode": "desk_cycle", "selection": "us-listed"}
+
+    out = tools.run_lance_desk_cycle(
+        market="us-listed",
+        market_limit=500,
+        service=FakeDeskCycleService(),
+    )
+
+    assert out["mode"] == "desk_cycle"
+    assert out["selection"] == "us-listed"
+
+
+def test_validate_live_market_readiness_tool_with_injected_service():
+    class FakeValidationService:
+        def run(self, **kwargs):
+            assert kwargs["tickers"] == ["IBM", "MRVL"]
+            assert kwargs["max_candidates"] == 2
+            assert kwargs["now"] == "2026-07-01T18:31:00Z"
+            return {
+                "agent_name": "market_validation",
+                "status": "ready",
+                "ticker_count": 2,
+            }
+
+    out = tools.validate_live_market_readiness(
+        tickers=["IBM", "MRVL"],
+        max_candidates=2,
+        now="2026-07-01T18:31:00Z",
+        service=FakeValidationService(),
+    )
+
+    assert out["status"] == "ready"
+    assert out["ticker_count"] == 2
+
+
+def test_summarize_lance_memory_tool_with_injected_service():
+    class FakeMemoryService:
+        def summarize(self, **kwargs):
+            assert kwargs["session_id"] == "session-1"
+            assert kwargs["ticker"] == "MRVL"
+            assert kwargs["limit"] == 25
+            return {
+                "agent_name": "lance_intraday",
+                "strategy": "Lance market memory report",
+                "status": "OK",
+                "outcome_count": 2,
+            }
+
+    out = tools.summarize_lance_memory(
+        session_id="session-1",
+        ticker="MRVL",
+        limit=25,
+        service=FakeMemoryService(),
+    )
+
+    assert out["status"] == "OK"
+    assert out["outcome_count"] == 2
+
+
+def test_run_lance_replay_tool_with_injected_service():
+    class FakeReplayService:
+        def replay(self, **kwargs):
+            assert kwargs["source_db_path"] == "data/market_data.sqlite"
+            assert kwargs["scratch_db_path"] == "/tmp/lance_replay.sqlite"
+            assert kwargs["scenario_name"] == "today_replay"
+            assert kwargs["scenarios_path"] == "data/lance_replay_scenarios.yaml"
+            assert kwargs["session_id"] == "session-1"
+            assert kwargs["target_session_date"] == "2026-07-02"
+            assert kwargs["outcomes"] == [{"ticker": "OPEN", "outcome": "worked"}]
+            assert kwargs["limit"] == 20
+            assert kwargs["check_assertions"] is True
+            return {
+                "agent_name": "lance_intraday",
+                "mode": "replay",
+                "status": "OK",
+                "memory": {"outcome_count": 1},
+                "assertions": {"status": "PASS"},
+            }
+
+    out = tools.run_lance_replay(
+        source_db_path="data/market_data.sqlite",
+        scratch_db_path="/tmp/lance_replay.sqlite",
+        scenario_name="today_replay",
+        scenarios_path="data/lance_replay_scenarios.yaml",
+        session_id="session-1",
+        target_session_date="2026-07-02",
+        outcomes=[{"ticker": "OPEN", "outcome": "worked"}],
+        limit=20,
+        check_assertions=True,
+        service=FakeReplayService(),
+    )
+
+    assert out["mode"] == "replay"
+    assert out["memory"]["outcome_count"] == 1
+    assert out["assertions"]["status"] == "PASS"
+
+
+def test_run_lance_replay_suite_tool_with_injected_service():
+    class FakeSuiteService:
+        def run(self, **kwargs):
+            assert kwargs["source_db_path"] == "data/market_data.sqlite"
+            assert kwargs["scenarios_path"] == "data/lance_replay_scenarios.yaml"
+            assert kwargs["scratch_dir"] == "/tmp/lance_suite"
+            return {
+                "agent_name": "lance_intraday",
+                "mode": "replay_suite",
+                "status": "PASS",
+                "scenario_count": 2,
+                "passed_count": 2,
+                "failed_count": 0,
+            }
+
+    out = tools.run_lance_replay_suite(
+        source_db_path="data/market_data.sqlite",
+        scenarios_path="data/lance_replay_scenarios.yaml",
+        scratch_dir="/tmp/lance_suite",
+        service=FakeSuiteService(),
+    )
+
+    assert out["mode"] == "replay_suite"
+    assert out["status"] == "PASS"
+    assert out["scenario_count"] == 2
+
+
+def test_run_lance_system_check_tool_with_injected_service():
+    class FakeSystemCheckService:
+        def run(self, **kwargs):
+            assert kwargs["source_db_path"] == "data/market_data.sqlite"
+            assert kwargs["scenarios_path"] == "data/lance_replay_scenarios.yaml"
+            assert kwargs["scratch_dir"] == "/tmp/lance_system_check"
+            return {
+                "agent_name": "lance_intraday",
+                "mode": "system_check",
+                "status": "PASS",
+                "summary": {
+                    "suite_status": "PASS",
+                    "suite_scenarios": 2,
+                    "suite_passed": 2,
+                    "suite_failed": 0,
+                    "source_outcomes_before": 0,
+                    "source_outcomes_after": 0,
+                },
+            }
+
+    out = tools.run_lance_system_check(
+        source_db_path="data/market_data.sqlite",
+        scenarios_path="data/lance_replay_scenarios.yaml",
+        scratch_dir="/tmp/lance_system_check",
+        service=FakeSystemCheckService(),
+    )
+
+    assert out["mode"] == "system_check"
+    assert out["status"] == "PASS"
+    assert out["summary"]["suite_scenarios"] == 2
+
+
+def test_track_lance_session_changes_tool_with_injected_service():
+    class FakeTrackerService:
+        def diff(self, **kwargs):
+            assert kwargs["previous"]["session_ids"]["intraday"] == "prev-intraday"
+            assert kwargs["current"]["session_ids"]["intraday"] == "current-intraday"
+            return {
+                "agent_name": "lance_full_cycle",
+                "mode": "session_tracker",
+                "status": "OK",
+                "summary": {"new_count": 1},
+                "groups": {"new": [{"ticker": "IBM"}]},
+                "disclaimer": "Matches your filter - not buy/sell advice. Verify before acting.",
+            }
+
+    out = tools.track_lance_session_changes(
+        previous={"session_ids": {"intraday": "prev-intraday"}},
+        current={"session_ids": {"intraday": "current-intraday"}},
+        service=FakeTrackerService(),
+    )
+
+    assert out["mode"] == "session_tracker"
+    assert out["summary"]["new_count"] == 1
+    assert out["groups"]["new"][0]["ticker"] == "IBM"
+
+
+def test_run_lance_command_center_tool_with_injected_service():
+    class FakeCommandCenterService:
+        def run(self, **kwargs):
+            assert kwargs["tickers"] == "IBM,MU"
+            assert kwargs["previous"] == {"combined_watchlist": []}
+            assert kwargs["persist"] is True
+            assert kwargs["target_session_date"] == "2026-07-06"
+            return {
+                "agent_name": "lance_full_cycle",
+                "mode": "command_center",
+                "status": "OK",
+                "single_run_read": {"one_liner": "1 active monitor."},
+                "disclaimer": "Matches your filter - not buy/sell advice. Verify before acting.",
+            }
+
+    out = tools.run_lance_command_center(
+        tickers="IBM,MU",
+        previous={"combined_watchlist": []},
+        persist=True,
+        target_session_date="2026-07-06",
+        service=FakeCommandCenterService(),
+    )
+
+    assert out["mode"] == "command_center"
+    assert out["single_run_read"]["one_liner"] == "1 active monitor."
+
+
+def test_run_lance_command_center_tool_accepts_market_selector():
+    class FakeCommandCenterService:
+        def run(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 500
+            assert kwargs["all_universes"] is False
+            return {
+                "mode": "command_center",
+                "workflow_commands": {"now": ".venv/bin/python -m cli.lance --market us-listed"},
+            }
+
+    out = tools.run_lance_command_center(
+        market="us-listed",
+        market_limit=500,
+        service=FakeCommandCenterService(),
+    )
+
+    assert out["mode"] == "command_center"
+    assert "--market us-listed" in out["workflow_commands"]["now"]
+
+
+def test_explain_lance_ticker_tool_with_injected_service():
+    class FakeTickerExplainService:
+        def explain(self, **kwargs):
+            assert kwargs["ticker"] == "IBM"
+            assert kwargs["payload"] == {"mode": "command_center"}
+            assert kwargs["payload_path"] == "data/live_sessions/latest_command_center.json"
+            return {
+                "agent_name": "lance_full_cycle",
+                "mode": "ticker_explain",
+                "ticker": "IBM",
+                "status": "FOUND",
+                "summary": "IBM is in Lance output.",
+                "disclaimer": "Matches your filter - not buy/sell advice. Verify before acting.",
+            }
+
+    out = tools.explain_lance_ticker(
+        ticker="IBM",
+        payload={"mode": "command_center"},
+        payload_path="data/live_sessions/latest_command_center.json",
+        service=FakeTickerExplainService(),
+    )
+
+    assert out["mode"] == "ticker_explain"
+    assert out["ticker"] == "IBM"
+    assert out["status"] == "FOUND"
+
+
+def test_run_lance_data_doctor_tool_with_injected_service():
+    class FakeDataDoctorService:
+        def diagnose(self, **kwargs):
+            assert kwargs["tickers"] == "IBM,MU"
+            assert kwargs["max_candidates"] == 2
+            assert kwargs["now"] == "2026-07-03T14:00:00Z"
+            return {
+                "agent_name": "lance_data_doctor",
+                "mode": "data_doctor",
+                "status": "blocked",
+                "doctor_read": {"one_liner": "1 ready, 1 blocked."},
+                "disclaimer": "Matches your filter - not buy/sell advice. Verify before acting.",
+            }
+
+    out = tools.run_lance_data_doctor(
+        tickers="IBM,MU",
+        max_candidates=2,
+        now="2026-07-03T14:00:00Z",
+        service=FakeDataDoctorService(),
+    )
+
+    assert out["mode"] == "data_doctor"
+    assert out["doctor_read"]["one_liner"] == "1 ready, 1 blocked."
+
+
 def test_tool_definitions_are_well_formed():
     names = {t["name"] for t in definitions.TOOLS}
     assert names == {
         "scan_premarket",
         "scan_small_caps",
         "scan_breitstein",
-        "explain_breitstein_ticker",
-        "scan_breitstein_intraday",
-        "scan_temiz_first_red_day",
-        "scan_grittani_morning_panic",
-        "get_trader_context",
-        "explain_ticker_as_trader",
-        "run_desk",
-        "run_morning_brief",
-        "deep_dive_ticker",
+        "run_trading_desk",
+        "run_sykes_live",
         "list_universes",
         "get_ticker_snapshot",
+        "scan_breitstein_intraday",
+        "build_lance_intraday_plan",
+        "build_lance_swing_plan",
+        "run_lance_swing_cycle",
+        "run_lance_full_cycle",
+        "track_lance_session_changes",
+        "run_lance_command_center",
+        "explain_lance_ticker",
+        "run_lance_data_doctor",
+        "review_lance_full_cycle",
+        "journal_lance_full_cycle_outcome",
+        "get_lance_session_dashboard",
+        "build_lance_tomorrow_prep",
+        "build_lance_unified_plan",
+        "run_lance_market_scan",
+        "update_lance_watchlist",
+        "run_advanced_lance_scan",
+        "journal_lance_outcome",
+        "get_lance_session_timeline",
+        "review_lance_session",
+        "build_lance_carryover_plan",
+        "run_lance_desk_cycle",
+        "validate_live_market_readiness",
+        "summarize_lance_memory",
+        "run_lance_replay",
+        "run_lance_replay_suite",
+        "run_lance_system_check",
+        "scan_temiz_first_red_day",
+        "scan_grittani_morning_panic",
     }
     for tool in definitions.TOOLS:
         assert tool["description"]
@@ -944,44 +1358,206 @@ def test_tool_definitions_are_well_formed():
     assert "market" in small_cap_tool["input_schema"]["properties"]
     assert "market_limit" in small_cap_tool["input_schema"]["properties"]
     assert "max_workers" in small_cap_tool["input_schema"]["properties"]
-    assert "refresh_catalysts" in small_cap_tool["input_schema"]["properties"]
+    assert "include_rejected" in small_cap_tool["input_schema"]["properties"]
 
-    breitstein_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "scan_breitstein")
-    assert "watchlist" in breitstein_tool["input_schema"]["properties"]
-    assert "market" in breitstein_tool["input_schema"]["properties"]
-    assert "market_limit" in breitstein_tool["input_schema"]["properties"]
-    assert "max_workers" in breitstein_tool["input_schema"]["properties"]
+    replay_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "run_lance_replay")
+    replay_props = replay_tool["input_schema"]["properties"]
+    assert "source_db_path" in replay_props
+    assert "scratch_db_path" in replay_props
+    assert "scenario_name" in replay_props
+    assert "scenarios_path" in replay_props
+    assert "check_assertions" in replay_props
+    assert "outcomes" in replay_props
 
-    explain_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "explain_breitstein_ticker")
-    assert explain_tool["input_schema"]["required"] == ["ticker"]
+    replay_suite_tool = next(
+        tool for tool in definitions.TOOLS if tool["name"] == "run_lance_replay_suite"
+    )
+    replay_suite_props = replay_suite_tool["input_schema"]["properties"]
+    assert "source_db_path" in replay_suite_props
+    assert "scenarios_path" in replay_suite_props
+    assert "scratch_dir" in replay_suite_props
 
-    intraday_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "scan_breitstein_intraday")
-    assert intraday_tool["input_schema"]["required"] == ["tickers"]
+    system_check_tool = next(
+        tool for tool in definitions.TOOLS if tool["name"] == "run_lance_system_check"
+    )
+    system_check_props = system_check_tool["input_schema"]["properties"]
+    assert "source_db_path" in system_check_props
+    assert "scenarios_path" in system_check_props
+    assert "scratch_dir" in system_check_props
 
-    temiz_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "scan_temiz_first_red_day")
-    assert temiz_tool["input_schema"]["required"] == ["tickers"]
 
-    grittani_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "scan_grittani_morning_panic")
-    assert grittani_tool["input_schema"]["required"] == ["tickers"]
-    assert "rvol_by_ticker" in grittani_tool["input_schema"]["properties"]
+def test_scan_small_caps_tool_includes_session_banner_and_row_time_fields():
+    from app.models import SmallCapCandidate, SmallCapScanOutput
 
-    context_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "get_trader_context")
-    assert context_tool["input_schema"]["required"] == ["ticker"]
+    class FakeSmallCapService:
+        def scan(self, **kwargs):
+            assert kwargs["include_rejected"] is True
+            return SmallCapScanOutput(
+                preset="sykes_small_cap_v0",
+                run_ids=["run-1"],
+                candidate_count=2,
+                candidates=[
+                    SmallCapCandidate(
+                        ticker="GOOD",
+                        name="Good Inc.",
+                        market_cap=25_000_000,
+                        gap_pct=8.0,
+                        gap_dollar=0.5,
+                        gap_basis="premarket",
+                        volume=2_000_000,
+                        rel_volume=4.0,
+                        confidence="OK",
+                        score=88,
+                        grade="A_WATCH",
+                        timestamp="2026-06-29T13:00:00Z",  # 09:00 ET (PRE_MARKET)
+                    ),
+                    SmallCapCandidate(
+                        ticker="STALE",
+                        name="Stale Corp.",
+                        market_cap=40_000_000,
+                        gap_pct=4.0,
+                        gap_dollar=0.3,
+                        gap_basis="last_trade",
+                        volume=1_500_000,
+                        rel_volume=3.0,
+                        confidence="STALE_DATA",
+                        score=72,
+                        grade="B_WATCH",
+                        timestamp="2026-06-29T23:30:00Z",  # 19:30 ET (POST_MARKET)
+                    ),
+                ],
+                notes=[],
+                rejected=[
+                    SmallCapCandidate(
+                        ticker="REJ",
+                        name="Reject Co.",
+                        market_cap=80_000_000,
+                        gap_pct=2.0,
+                        gap_dollar=0.1,
+                        gap_basis="premarket",
+                        volume=300_000,
+                        rel_volume=0.5,
+                        confidence="CONFLICT",
+                        score=0,
+                        grade="REJECT",
+                        timestamp="2026-06-29T12:00:00Z",
+                        risk_notes=["Rejected because confidence is CONFLICT."],
+                    ),
+                ],
+                rejected_count=1,
+            )
 
-    explain_context_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "explain_ticker_as_trader")
-    assert explain_context_tool["input_schema"]["required"] == ["ticker"]
+    out = tools.scan_small_caps(
+        tickers="GOOD,STALE,REJ",
+        include_rejected=True,
+        service=FakeSmallCapService(),
+    )
 
-    run_desk_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "run_desk")
-    assert run_desk_tool["input_schema"]["required"] == []
-    assert "trader_profiles" in run_desk_tool["input_schema"]["properties"]
-    assert "watchlist" in run_desk_tool["input_schema"]["properties"]
-    assert "market" in run_desk_tool["input_schema"]["properties"]
+    # Session banner derives from the most recent candidate timestamp.
+    assert out["session_banner"].startswith("POST_MARKET, Jun 29 7:30 PM ET.")
 
-    morning_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "run_morning_brief")
-    assert morning_tool["input_schema"]["required"] == []
-    assert "profile" in morning_tool["input_schema"]["properties"]
-    assert "save_journal" in morning_tool["input_schema"]["properties"]
+    # Per-row time / session / caveat fields exist on every candidate.
+    good = out["candidates"][0]
+    assert good["timestamp"] == "2026-06-29T13:00:00Z"
+    assert good["as_of_utc"] == "2026-06-29T13:00:00Z"
+    assert good["as_of_et"] == "Jun 29 9:00 AM ET"
+    assert good["session_mode"] == "PRE_MARKET"
+    assert good["data_caveat"] is None  # clean premarket = no caveat
 
-    deep_dive_tool = next(tool for tool in definitions.TOOLS if tool["name"] == "deep_dive_ticker")
-    assert deep_dive_tool["input_schema"]["required"] == ["ticker"]
-    assert "trader_profile" in deep_dive_tool["input_schema"]["properties"]
+    stale = out["candidates"][1]
+    assert stale["as_of_et"] == "Jun 29 7:30 PM ET"
+    assert stale["session_mode"] == "POST_MARKET"
+    assert stale["data_caveat"] is not None
+    assert "POST_MARKET:" in stale["data_caveat"]
+    assert "last_trade" in stale["data_caveat"]
+    assert "STALE_DATA" in stale["data_caveat"]
+    assert "Not a live premarket gap" in stale["data_caveat"]
+
+    # Rejected rows + count are exposed only when opted in.
+    assert out["rejected_count"] == 1
+    assert len(out["rejected"]) == 1
+    assert out["rejected"][0]["ticker"] == "REJ"
+    assert out["rejected"][0]["grade"] == "REJECT"
+    assert "Rejected because confidence is CONFLICT." in out["rejected"][0]["risk_notes"]
+    assert out["rejected"][0]["session_mode"] == "PRE_MARKET"
+
+
+def test_scan_small_caps_tool_hides_rejected_when_opt_out():
+    from app.models import SmallCapCandidate, SmallCapScanOutput
+
+    class FakeSmallCapService:
+        def scan(self, **kwargs):
+            assert kwargs.get("include_rejected") is False
+            return SmallCapScanOutput(
+                preset="sykes_small_cap_v0",
+                run_ids=["run-1"],
+                candidate_count=1,
+                candidates=[
+                    SmallCapCandidate(
+                        ticker="GOOD",
+                        name="Good Inc.",
+                        market_cap=25_000_000,
+                        gap_pct=8.0,
+                        gap_dollar=0.5,
+                        gap_basis="premarket",
+                        volume=2_000_000,
+                        rel_volume=4.0,
+                        confidence="OK",
+                        score=88,
+                        grade="A_WATCH",
+                        timestamp="2026-06-29T13:00:00Z",
+                    ),
+                ],
+                notes=[],
+                rejected=[
+                    SmallCapCandidate(
+                        ticker="REJ",
+                        name="Reject Co.",
+                        market_cap=80_000_000,
+                        gap_pct=2.0,
+                        gap_dollar=0.1,
+                        gap_basis="premarket",
+                        volume=300_000,
+                        rel_volume=0.5,
+                        confidence="CONFLICT",
+                        score=0,
+                        grade="REJECT",
+                        timestamp="2026-06-29T13:00:00Z",
+                    ),
+                ],
+                rejected_count=1,
+            )
+
+    out = tools.scan_small_caps(
+        tickers="GOOD,REJ",
+        service=FakeSmallCapService(),
+    )
+
+    assert "rejected" not in out
+    assert "rejected_count" not in out
+    assert out["session_banner"].startswith("PRE_MARKET, Jun 29 9:00 AM ET.")
+
+
+def test_scan_small_caps_tool_emits_empty_state_when_no_candidates():
+    from app.models import SmallCapScanOutput
+
+    class FakeSmallCapService:
+        def scan(self, **kwargs):
+            return SmallCapScanOutput(
+                preset="sykes_small_cap_v0",
+                run_ids=[],
+                candidate_count=0,
+                candidates=[],
+                notes=[],
+                zero_result_reason="all_filtered",
+                relax_suggestions=[
+                    "Review rejected rows with include_rejected=True.",
+                ],
+            )
+
+    out = tools.scan_small_caps(tickers="HOT", service=FakeSmallCapService())
+
+    assert out["zero_result_reason"] == "all_filtered"
+    assert any("include_rejected=True" in s for s in out["relax_suggestions"])
+    # session_banner falls back to OFF_SESSION when no timestamps are present.
+    assert out["session_banner"].startswith("OFF_SESSION")

@@ -14,6 +14,9 @@ def _candidate(
     grade: str = "A_WATCH",
     score: int = 92,
     missing_fields: list[str] | None = None,
+    gap_basis: str = "premarket",
+    confidence: str = "OK",
+    timestamp: str = "2026-06-29T13:00:00Z",
 ) -> dict:
     return {
         "ticker": ticker,
@@ -21,10 +24,10 @@ def _candidate(
         "market_cap": 95_000_000,
         "gap_pct": 18.5,
         "gap_dollar": 0.74,
-        "gap_basis": "premarket",
+        "gap_basis": gap_basis,
         "volume": 8_500_000,
         "rel_volume": 6.2,
-        "confidence": "OK",
+        "confidence": confidence,
         "score": score,
         "grade": grade,
         "matched_signals": ["small_cap_fit", "strong_gap", "high_rvol"],
@@ -76,7 +79,7 @@ def _candidate(
             "sources": ["fake-profile", "sec"],
             "updated_at": "2026-06-28T12:30:00Z",
         },
-        "timestamp": "2026-06-28T12:00:00Z",
+        "timestamp": timestamp,
     }
 
 
@@ -132,6 +135,36 @@ def test_orchestrator_calls_small_cap_tool_and_buckets_candidates():
         "filing_risk=offering; former_runner=yes"
     )
     assert "Use only the scanner packet" in as_dict["handoff_prompt"]
+
+
+def test_orchestrator_passes_live_intraday_to_small_cap_tool():
+    calls = []
+
+    def fake_dispatch(name, tool_input, *, user_query=None, db_path=None):
+        calls.append((name, tool_input))
+        return {
+            "preset": "sykes_small_cap_v0",
+            "run_ids": ["run-1"],
+            "candidate_count": 0,
+            "candidates": [],
+            "notes": [],
+        }
+
+    TradingAgentOrchestrator(dispatcher=fake_dispatch).run_sykes_small_cap_watchlist(
+        tickers="HOT",
+        live_intraday=True,
+    )
+
+    assert calls == [
+        (
+            "scan_small_caps",
+            {
+                "preset_name": "sykes_small_cap_v0",
+                "tickers": "HOT",
+                "live_intraday": True,
+            },
+        )
+    ]
 
 
 def test_orchestrator_can_run_market_scan():
@@ -272,3 +305,131 @@ def test_run_agent_cli_json_output_suppresses_provider_console_noise(monkeypatch
     assert data["status"] == "OK"
     assert result.output.lstrip().startswith("{")
     assert any("Suppressed provider console output" in note for note in data["notes"])
+
+
+def test_orchestrator_packet_carries_session_banner_and_per_row_time_fields():
+    calls = []
+
+    def fake_dispatch(name, tool_input, *, user_query=None, db_path=None):
+        calls.append(tool_input)
+        return {
+            "preset": "sykes_small_cap_v0",
+            "run_ids": ["run-1"],
+            "candidate_count": 1,
+            "candidates": [
+                _candidate(
+                    ticker="HOT",
+                    timestamp="2026-06-29T23:30:00Z",  # 19:30 ET (POST_MARKET)
+                    gap_basis="last_trade",
+                    confidence="STALE_DATA",
+                ),
+            ],
+            "notes": [],
+            "session_banner": "POST_MARKET, Jun 29 7:30 PM ET. last_trade means prior/last-session move, not live premarket.",
+        }
+
+    packet = TradingAgentOrchestrator(dispatcher=fake_dispatch).run_sykes_small_cap_watchlist(
+        tickers="HOT",
+    )
+
+    assert packet.session_banner.startswith("POST_MARKET, Jun 29 7:30 PM ET.")
+    primary = packet.watchlist["primary_watch"][0]
+    assert primary.as_of_utc == "2026-06-29T23:30:00Z"
+    assert primary.as_of_et == "Jun 29 7:30 PM ET"
+    assert primary.session_mode == "POST_MARKET"
+    assert primary.data_caveat is not None
+    assert "POST_MARKET:" in primary.data_caveat
+    assert "last_trade" in primary.data_caveat
+    assert "STALE_DATA" in primary.data_caveat
+    assert "Not a live premarket gap" in primary.data_caveat
+
+
+def test_orchestrator_packet_session_banner_is_none_for_clean_premarket():
+    def fake_dispatch(name, tool_input, *, user_query=None, db_path=None):
+        return {
+            "preset": "sykes_small_cap_v0",
+            "run_ids": ["run-1"],
+            "candidate_count": 1,
+            "candidates": [
+                _candidate(ticker="HOT", timestamp="2026-06-29T13:00:00Z"),
+            ],
+            "notes": [],
+            "session_banner": "PRE_MARKET, Jun 29 9:00 AM ET. Live premarket quotes are eligible for premarket-gap grading.",
+        }
+
+    packet = TradingAgentOrchestrator(dispatcher=fake_dispatch).run_sykes_small_cap_watchlist(
+        tickers="HOT",
+    )
+
+    primary = packet.watchlist["primary_watch"][0]
+    assert primary.session_mode == "PRE_MARKET"
+    assert primary.data_caveat is None  # clean premarket = no caveat
+
+
+def test_orchestrator_passes_include_rejected_through_to_tool():
+    calls = []
+
+    def fake_dispatch(name, tool_input, *, user_query=None, db_path=None):
+        calls.append(tool_input)
+        return {
+            "preset": "sykes_small_cap_v0",
+            "run_ids": ["run-1"],
+            "candidate_count": 1,
+            "candidates": [_candidate()],
+            "notes": [],
+        }
+
+    TradingAgentOrchestrator(dispatcher=fake_dispatch).run_sykes_small_cap_watchlist(
+        tickers="HOT",
+        include_rejected=True,
+    )
+
+    assert calls == [
+        {
+            "preset_name": "sykes_small_cap_v0",
+            "tickers": "HOT",
+            "include_rejected": True,
+        }
+    ]
+
+
+def test_orchestrator_omits_include_rejected_when_default_false():
+    calls = []
+
+    def fake_dispatch(name, tool_input, *, user_query=None, db_path=None):
+        calls.append(tool_input)
+        return {
+            "preset": "sykes_small_cap_v0",
+            "run_ids": ["run-1"],
+            "candidate_count": 1,
+            "candidates": [_candidate()],
+            "notes": [],
+        }
+
+    TradingAgentOrchestrator(dispatcher=fake_dispatch).run_sykes_small_cap_watchlist(
+        tickers="HOT",
+    )
+
+    assert "include_rejected" not in calls[0]
+
+
+def test_orchestrator_surfaces_zero_state_reason_in_warnings():
+    def fake_dispatch(name, tool_input, *, user_query=None, db_path=None):
+        return {
+            "preset": "sykes_small_cap_v0",
+            "run_ids": ["run-1"],
+            "candidate_count": 0,
+            "candidates": [],
+            "notes": [],
+            "zero_result_reason": "all_filtered",
+            "relax_suggestions": ["Review rejected rows with include_rejected=True."],
+            "session_banner": "OFF_SESSION. timestamps unavailable.",
+        }
+
+    packet = TradingAgentOrchestrator(dispatcher=fake_dispatch).run_sykes_small_cap_watchlist(
+        tickers="HOT",
+    )
+
+    assert any("zero_result_reason: all_filtered" in w for w in packet.warnings)
+    assert any("include_rejected=True" in w for w in packet.warnings)
+    assert packet.session_banner.startswith("OFF_SESSION")

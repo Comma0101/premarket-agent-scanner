@@ -90,7 +90,7 @@ class ProviderPriceData:
 class HaltStatus:
     ticker: str
     status: str
-    is_active: bool
+    is_active: bool = False
     reason_code: str | None = None
     reason: str | None = None
     halt_time: str | None = None
@@ -139,6 +139,7 @@ class ScanFilters:
     min_volume: float | None = None
     min_rel_volume: float | None = None
     include_low_confidence: bool = True
+    allow_missing_filter_fields: bool = False
 
 
 @dataclass
@@ -183,6 +184,7 @@ def make_scan_filters(
     min_volume: float | None = None,
     min_rel_volume: float | None = None,
     include_low_confidence: bool = True,
+    allow_missing_filter_fields: bool = False,
 ) -> ScanFilters:
     """Build ScanFilters, expanding a cap tier into market-cap bounds.
 
@@ -202,6 +204,7 @@ def make_scan_filters(
         min_volume=min_volume,
         min_rel_volume=min_rel_volume,
         include_low_confidence=include_low_confidence,
+        allow_missing_filter_fields=allow_missing_filter_fields,
     )
 
 
@@ -219,6 +222,7 @@ class ScannerResult:
     confidence: Confidence
     notes: str | None
     rel_volume: float | None = None
+    rel_volume_basis: str | None = None
     gap_dollar: float | None = None
     # What the gap's effective price actually is: "premarket" (genuine premarket
     # quote), "last_trade" (most recent regular/last trade — off-session this is a
@@ -329,6 +333,7 @@ class SmallCapCandidate:
     confidence: Confidence
     score: int
     grade: SmallCapGrade
+    rel_volume_basis: str | None = None
     gap_basis: str | None = None
     matched_signals: list[str] = field(default_factory=list)
     missing_fields: list[str] = field(default_factory=list)

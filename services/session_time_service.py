@@ -36,6 +36,30 @@ def format_et(
     return f"{ny.strftime('%b')} {ny.day} {hour12}:{ny.minute:02d} {suffix} ET"
 
 
+def ny_date_for(value: str | datetime | None = None, *, now: datetime | None = None) -> str | None:
+    parsed = _coerce(value, now=now)
+    if parsed is None:
+        return None
+    return parsed.astimezone(NY_TZ).date().isoformat()
+
+
+def market_session_context_for(
+    value: str | datetime | None = None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    parsed = _coerce(value, now=now) or datetime.now(UTC)
+    mode = session_mode_for(parsed)
+    return {
+        "session_mode": mode,
+        "as_of_et": format_et(parsed),
+        "trading_date": parsed.astimezone(NY_TZ).date().isoformat(),
+        "is_market_open": mode == "MARKET_OPEN",
+        "is_market_holiday": False,
+        "market_closed_reason": None,
+    }
+
+
 def session_mode_for(
     value: str | datetime | None,
     *,

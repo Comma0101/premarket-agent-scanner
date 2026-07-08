@@ -46,6 +46,11 @@ def main(
         "--include-rejected",
         help="Show rejected rows with reject reasons and data caveats.",
     ),
+    live_intraday: bool = typer.Option(
+        False,
+        "--live-intraday",
+        help="Live discovery mode: keep movers while enrichment is incomplete.",
+    ),
     all_universes: bool = typer.Option(False, "--all", help="Scan every defined universe."),
 ) -> None:
     if not any([universe, watchlist, tickers, market, all_universes]):
@@ -64,6 +69,7 @@ def main(
             max_workers=max_workers,
             all_universes=all_universes,
             include_rejected=include_rejected,
+            live_intraday=live_intraday,
         )
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc

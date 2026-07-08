@@ -4,7 +4,7 @@
 
 This document distills public Tim Grittani material into a non-impersonating
 Grittani-style educational lens. It does not claim endorsement or private access.
-The focus is on his data-driven, setup-specific mechanical trading rules as 
+The focus is on his data-driven, setup-specific mechanical trading rules as
 gathered from public interviews, courses, and educational material.
 
 ## Source-Backed Principles

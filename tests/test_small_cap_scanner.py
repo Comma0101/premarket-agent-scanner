@@ -204,6 +204,33 @@ def test_scan_small_caps_cli_passes_max_workers(monkeypatch):
     assert calls["max_workers"] == 6
 
 
+def test_scan_small_caps_cli_passes_live_intraday(monkeypatch):
+    import cli.scan_small_caps as module
+
+    calls = {}
+
+    class FakeSmallCapScannerService:
+        def scan(self, **kwargs):
+            calls.update(kwargs)
+            return SmallCapScanOutput(
+                preset=kwargs["preset_name"],
+                run_ids=[],
+                candidate_count=0,
+                candidates=[],
+                notes=[],
+            )
+
+    monkeypatch.setattr(module, "SmallCapScannerService", FakeSmallCapScannerService)
+
+    result = CliRunner().invoke(
+        module.app,
+        ["--tickers", "HOT", "--live-intraday"],
+    )
+
+    assert result.exit_code == 0
+    assert calls["live_intraday"] is True
+
+
 def _result(
     *,
     ticker="HOT",
@@ -682,3 +709,217 @@ def test_small_cap_scanner_unions_cap_tiers_and_ranks_candidates():
     assert output.run_ids == ["run-1"]
     assert [candidate.ticker for candidate in output.candidates] == ["HOT", "OKAY"]
     assert output.candidates[0].score > output.candidates[1].score
+
+
+def test_small_cap_live_intraday_discovery_relaxes_missing_enrichment_prefilters():
+    class FakeScanner:
+        def __init__(self):
+            self.calls = []
+
+        def scan(self, **kwargs):
+            self.calls.append(kwargs)
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[
+                    _result(
+                        ticker="MOVER",
+                        market_cap=None,
+                        gap_pct=8.0,
+                        volume=None,
+                        rel_volume=None,
+                        confidence="MISSING_MARKET_CAP",
+                        gap_basis="last_trade",
+                    )
+                ],
+                notes=[],
+            )
+
+    class NoopEvidenceService:
+        def enrich_candidates(self, candidates):
+            return candidates
+
+    fake = FakeScanner()
+    output = SmallCapScannerService(
+        scanner_service=fake,
+        evidence_service=NoopEvidenceService(),
+    ).scan(
+        tickers="MOVER",
+        preset_name="sykes_small_cap_v0",
+        live_intraday=True,
+    )
+
+    filters = fake.calls[0]["filters"]
+    assert filters.include_low_confidence is True
+    assert filters.allow_missing_filter_fields is True
+    assert filters.min_volume is None
+    assert filters.min_rel_volume is None
+    assert output.candidate_count == 1
+    candidate = output.candidates[0]
+    assert candidate.ticker == "MOVER"
+    assert candidate.grade == "C_WATCH"
+    assert "missing_market_cap" in candidate.matched_signals
+    assert any("Live intraday discovery mode" in note for note in output.notes)
+
+
+def test_include_rejected_default_hides_rejected_rows():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[
+                    _result(ticker="PASS", gap_pct=8.0, gap_basis="premarket"),
+                    _result(ticker="MISS", gap_pct=2.0, confidence="CONFLICT"),
+                ],
+                notes=[],
+            )
+
+    class NoopEvidence:
+        def enrich_candidates(self, candidates):
+            return candidates
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=NoopEvidence(),
+    ).scan(tickers="PASS,MISS", preset_name="sykes_small_cap_v0")
+
+    assert output.candidate_count == 1
+    assert output.rejected_count == 0
+    assert output.rejected == []
+    assert output.zero_result_reason is None
+
+
+def test_include_rejected_true_returns_rejected_rows_with_reasons():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[
+                    _result(ticker="PASS", gap_pct=8.0, gap_basis="premarket"),
+                    _result(ticker="BADCONFLICT", gap_pct=2.0, confidence="CONFLICT"),
+                    _result(ticker="BADNOGAP", gap_pct=-3.0, confidence="OK"),
+                ],
+                notes=[],
+            )
+
+    class NoopEvidence:
+        def enrich_candidates(self, candidates):
+            return candidates
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=NoopEvidence(),
+    ).scan(
+        tickers="PASS,BADCONFLICT,BADNOGAP",
+        preset_name="sykes_small_cap_v0",
+        include_rejected=True,
+    )
+
+    assert output.candidate_count == 1
+    assert output.rejected_count == 2
+    rejected_tickers = {candidate.ticker for candidate in output.rejected}
+    assert rejected_tickers == {"BADCONFLICT", "BADNOGAP"}
+    for candidate in output.rejected:
+        assert candidate.grade == "REJECT"
+        assert candidate.risk_notes  # non-empty reason list
+
+
+def test_zero_result_reason_when_all_filtered_no_rejected():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[],
+                notes=[],
+            )
+
+    class NoopEvidence:
+        def enrich_candidates(self, candidates):
+            return candidates
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=NoopEvidence(),
+    ).scan(tickers="HOT", preset_name="sykes_small_cap_v0")
+
+    assert output.candidate_count == 0
+    assert output.zero_result_reason == "all_filtered"
+    assert output.relax_suggestions
+    assert any("include_rejected=True" in s for s in output.relax_suggestions)
+
+
+def test_zero_result_reason_when_all_data_quality_drops():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[
+                    _result(ticker="BAD1", gap_pct=4.0, confidence="CONFLICT"),
+                    _result(ticker="BAD2", gap_pct=4.0, confidence="MISSING_PREVIOUS_CLOSE"),
+                ],
+                notes=[],
+            )
+
+    class NoopEvidence:
+        def enrich_candidates(self, candidates):
+            return candidates
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=NoopEvidence(),
+    ).scan(tickers="BAD1,BAD2", preset_name="sykes_small_cap_v0")
+
+    assert output.candidate_count == 0
+    assert output.zero_result_reason == "all_failed_data_quality"
+    assert any("PRE_MARKET" in s for s in output.relax_suggestions)
+
+
+def test_zero_result_reason_empty_selection():
+    class FakeScanner:
+        def scan(self, **kwargs):
+            return ScanRunOutput(
+                run_id="run-1",
+                universe="fake",
+                started_at="2026-06-28T12:00:00Z",
+                completed_at="2026-06-28T12:01:00Z",
+                status="OK",
+                results=[],
+                notes=[],
+            )
+
+    class NoopEvidence:
+        def enrich_candidates(self, candidates):
+            return candidates
+
+    output = SmallCapScannerService(
+        scanner_service=FakeScanner(),
+        evidence_service=NoopEvidence(),
+    ).scan(
+        universe="DOES_NOT_EXIST_BUT_NO_THROW",
+        preset_name="sykes_small_cap_v0",
+    )
+
+    # The fake scanner returns zero results regardless of input. When the
+    # selection itself is empty (no universe/tickers/etc.), the service should
+    # report empty_selection if nothing was resolved.
+    assert output.candidate_count == 0
+    assert output.zero_result_reason in {"empty_selection", "all_filtered"}

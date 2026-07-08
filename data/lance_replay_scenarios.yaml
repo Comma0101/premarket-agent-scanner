@@ -1,0 +1,51 @@
+# Named Lance replay scenarios.
+#
+# These scenarios are for closed-market workflow testing. Outcome labels are
+# synthetic unless a human has manually reviewed the chart/session. Replay runs
+# must use a scratch database; never write synthetic labels to the source DB.
+
+today_lance_basic:
+  description: Basic closed-market replay using today's saved Lance session.
+  session_id: 2026-07-01-lance-intraday
+  target_session_date: "2026-07-02"
+  limit: 50
+  outcomes:
+    - ticker: OPEN
+      outcome: worked
+      notes: synthetic replay label; not a real reviewed outcome
+    - ticker: MRVL
+      outcome: failed
+      notes: synthetic replay label; not a real reviewed outcome
+    - ticker: ARM
+      outcome: chop
+      notes: synthetic replay label; not a real reviewed outcome
+  expected:
+    initial_pending_count: 13
+    final_pending_count: 10
+    reviewed_count: 3
+    memory_outcome_count: 3
+    carryover_count: 10
+    outcomes_applied_count: 3
+
+today_strength_weakness_rotation:
+  description: Replay a mixed strength/weakness rotation review path.
+  session_id: 2026-07-01-lance-intraday
+  target_session_date: "2026-07-02"
+  limit: 50
+  outcomes:
+    - ticker: RDDT
+      outcome: worked
+      notes: synthetic replay label; not a real reviewed outcome
+    - ticker: CRWV
+      outcome: reversed
+      notes: synthetic replay label; not a real reviewed outcome
+    - ticker: LRCX
+      outcome: failed
+      notes: synthetic replay label; not a real reviewed outcome
+  expected:
+    initial_pending_count: 13
+    final_pending_count: 10
+    reviewed_count: 3
+    memory_outcome_count: 3
+    carryover_count: 10
+    outcomes_applied_count: 3

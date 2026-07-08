@@ -19,11 +19,13 @@ from app.models import (
     utc_now_iso,
 )
 from services.scanner_service import (
+    REL_VOLUME_BASIS,
     ScannerService,
     compute_gap_dollar,
     compute_gap_pct,
     compute_rel_volume,
     gap_basis_for,
+    rel_volume_basis_for,
 )
 from services.snapshot_service import SnapshotService
 from services.universe_service import UniverseService
@@ -221,6 +223,8 @@ def test_compute_rel_volume():
     assert compute_rel_volume(1_000_000, None) is None
     assert compute_rel_volume(None, 1_000_000) is None
     assert compute_rel_volume(1_000_000, 0) is None
+    assert rel_volume_basis_for(3_000_000, 1_000_000) == REL_VOLUME_BASIS
+    assert rel_volume_basis_for(1_000_000, None) is None
 
 
 def test_resolve_cap_tier_bounds():
@@ -245,6 +249,7 @@ def test_cap_tier_filters_small_cap_gappers():
     out = _service(quotes).scan(tickers="SMOL,NVDA", filters=filters)
     assert [r.ticker for r in out.results] == ["SMOL"]
     assert out.results[0].rel_volume == 5.0
+    assert out.results[0].rel_volume_basis == REL_VOLUME_BASIS
 
 
 def test_min_rel_volume_filter():
@@ -265,6 +270,27 @@ def test_min_volume_filter_excludes_thin_names():
     filters = make_scan_filters(min_gap_abs=5.0, min_volume=1_000_000)
     out = _service(quotes).scan(tickers="LIQ,THIN", filters=filters)
     assert [r.ticker for r in out.results] == ["LIQ"]
+
+
+def test_allow_missing_filter_fields_keeps_live_discovery_rows_but_not_known_failures():
+    quotes = {
+        "UNKNOWN": _quote("UNKNOWN", prev=10.0, pre=11.0, cap=None, vol=None, avg_vol=None),
+        "LARGE": _quote("LARGE", prev=10.0, pre=11.0, cap=5.0e9, vol=None, avg_vol=None),
+    }
+    filters = ScanFilters(
+        max_market_cap=2.0e9,
+        min_gap_abs=5.0,
+        min_volume=500_000,
+        min_rel_volume=2.0,
+        direction="up",
+        include_low_confidence=True,
+        allow_missing_filter_fields=True,
+    )
+
+    out = _service(quotes).scan(tickers="UNKNOWN,LARGE", filters=filters)
+
+    assert [r.ticker for r in out.results] == ["UNKNOWN"]
+    assert out.results[0].confidence == "MISSING_MARKET_CAP"
 
 
 def test_gap_dollar_persisted_to_db(tmp_path):

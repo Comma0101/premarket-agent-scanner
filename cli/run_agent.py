@@ -30,6 +30,16 @@ def main(
         "--max-workers",
         help="Bounded worker count for broad market scans.",
     ),
+    include_rejected: bool = typer.Option(
+        False,
+        "--include-rejected",
+        help="Include rejected candidates (score=0, grade=REJECT) in the watchlist packet.",
+    ),
+    live_intraday: bool = typer.Option(
+        False,
+        "--live-intraday",
+        help="Opt-in regular-session discovery mode for small/spec movers that need enrichment.",
+    ),
     all_universes: bool = typer.Option(False, "--all", help="Scan every defined universe."),
     preset_name: str = typer.Option(
         "sykes_small_cap_v0",
@@ -52,6 +62,8 @@ def main(
         "market_limit": market_limit,
         "max_workers": max_workers,
         "all_universes": all_universes,
+        "include_rejected": include_rejected,
+        "live_intraday": live_intraday,
         "user_query": "run sykes-style small-cap watchlist agent",
     }
     packet = _run_agent_packet(json_output=json_output, **kwargs)
@@ -94,6 +106,8 @@ def _render_plain(packet: AgentRunPacket) -> None:
     typer.echo(f"Agent: {packet.agent_name}")
     typer.echo(f"Strategy: {packet.strategy}")
     typer.echo(f"Status: {packet.status}")
+    if packet.session_banner:
+        typer.echo(f"Session: {packet.session_banner}")
     typer.echo("")
 
     _render_bucket("Primary Watch", packet.watchlist["primary_watch"])
@@ -120,10 +134,13 @@ def _render_bucket(title: str, candidates: list[AgentWatchCandidate]) -> None:
     for candidate in candidates:
         gap = _fmt(candidate.gap_pct, suffix="%")
         rvol = _fmt(candidate.rel_volume, suffix="x")
+        time_label = candidate.as_of_et or "-"
         typer.echo(
             f"- {candidate.ticker} {candidate.grade} score={candidate.score} "
-            f"gap={gap} rvol={rvol} evidence={candidate.evidence_summary}"
+            f"gap={gap} rvol={rvol} as_of={time_label} evidence={candidate.evidence_summary}"
         )
+        if candidate.data_caveat:
+            typer.echo(f"    caveat: {candidate.data_caveat}")
 
 
 def _fmt(value: float | None, *, suffix: str = "") -> str:

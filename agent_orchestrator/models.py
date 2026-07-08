@@ -34,6 +34,13 @@ class AgentWatchCandidate:
     risk_notes: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
     gap_basis: str | None = None
+    # Human-readable NY time + raw UTC + session context. None when the
+    # underlying tool row had no timestamp; surface that as "unknown" in the
+    # brief rather than fabricating a time.
+    as_of_et: str | None = None
+    as_of_utc: str | None = None
+    session_mode: str | None = None
+    data_caveat: str | None = None
 
 
 @dataclass
@@ -47,6 +54,10 @@ class AgentRunPacket:
     warnings: list[str]
     notes: list[str] = field(default_factory=list)
     handoff_prompt: str = ""
+    # One-line session banner derived from the most recent candidate timestamp
+    # (or now if there is none). Always populated so the desk knows which
+    # session the brief applies to.
+    session_banner: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

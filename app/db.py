@@ -144,6 +144,45 @@ CREATE TABLE IF NOT EXISTS ticker_runner_history (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (ticker, event_date, source_run_id)
 );
+
+CREATE TABLE IF NOT EXISTS lance_watchlist_items (
+    session_id TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    state TEXT NOT NULL,
+    score REAL NOT NULL DEFAULT 0,
+    playbook TEXT NOT NULL,
+    why_watching TEXT NOT NULL,
+    invalidates_if TEXT,
+    next_step TEXT,
+    data_quality_json TEXT NOT NULL DEFAULT '{}',
+    plan_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (session_id, ticker)
+);
+
+CREATE TABLE IF NOT EXISTS lance_outcomes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    playbook TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    notes TEXT,
+    plan_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS lance_watchlist_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    state TEXT NOT NULL,
+    score REAL NOT NULL DEFAULT 0,
+    data_quality_json TEXT NOT NULL DEFAULT '{}',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -195,6 +234,17 @@ def _json_loads_list(value: str | None) -> list[Any]:
         return []
     parsed = json.loads(value)
     return parsed if isinstance(parsed, list) else []
+
+
+def _json_dumps_dict(values: dict[str, Any] | None) -> str:
+    return json.dumps(values or {}, sort_keys=True)
+
+
+def _json_loads_dict(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    parsed = json.loads(value)
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def upsert_asset(conn: sqlite3.Connection, profile: AssetProfile) -> None:
@@ -556,6 +606,273 @@ def get_runner_history(
         )
         for row in rows
     ]
+
+
+def upsert_lance_watchlist_item(
+    db_path: str | Path | None,
+    *,
+    session_id: str,
+    ticker: str,
+    state: str,
+    score: float,
+    playbook: str,
+    why_watching: str,
+    invalidates_if: str | None,
+    next_step: str | None,
+    data_quality: dict[str, Any] | None,
+    plan: dict[str, Any] | None,
+) -> None:
+    normalized = ticker.upper()
+    now = utc_now_iso()
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO lance_watchlist_items (
+                session_id, ticker, created_at, updated_at, state, score, playbook,
+                why_watching, invalidates_if, next_step, data_quality_json, plan_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id, ticker) DO UPDATE SET
+                updated_at = excluded.updated_at,
+                state = excluded.state,
+                score = excluded.score,
+                playbook = excluded.playbook,
+                why_watching = excluded.why_watching,
+                invalidates_if = excluded.invalidates_if,
+                next_step = excluded.next_step,
+                data_quality_json = excluded.data_quality_json,
+                plan_json = excluded.plan_json
+            """,
+            (
+                session_id,
+                normalized,
+                now,
+                now,
+                state,
+                float(score),
+                playbook,
+                why_watching,
+                invalidates_if,
+                next_step,
+                _json_dumps_dict(data_quality),
+                _json_dumps_dict(plan),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_lance_watchlist_items(
+    db_path: str | Path | None,
+    *,
+    session_id: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM lance_watchlist_items
+            WHERE session_id = ?
+            ORDER BY score DESC, updated_at DESC, ticker ASC
+            LIMIT ?
+            """,
+            (session_id, max(0, int(limit))),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    output = []
+    for row in rows:
+        item = dict(row)
+        item["data_quality"] = _json_loads_dict(item.pop("data_quality_json", None))
+        item["plan"] = _json_loads_dict(item.pop("plan_json", None))
+        output.append(item)
+    return output
+
+
+def get_latest_lance_session_id(
+    db_path: str | Path | None,
+    *,
+    session_id_suffix: str | None = None,
+    exclude_session_id_suffix: str | None = None,
+) -> str | None:
+    clauses = []
+    params: list[Any] = []
+    if session_id_suffix:
+        clauses.append("session_id LIKE ?")
+        params.append(f"%{session_id_suffix}")
+    if exclude_session_id_suffix:
+        clauses.append("session_id NOT LIKE ?")
+        params.append(f"%{exclude_session_id_suffix}")
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            f"""
+            SELECT session_id, MAX(rowid) AS latest_row_id
+            FROM lance_watchlist_items
+            {where}
+            GROUP BY session_id
+            ORDER BY MAX(updated_at) DESC, latest_row_id DESC
+            LIMIT 1
+            """,
+            params,
+        ).fetchone()
+    finally:
+        conn.close()
+    return None if row is None else str(row["session_id"])
+
+
+def insert_lance_outcome(
+    db_path: str | Path | None,
+    *,
+    session_id: str,
+    ticker: str,
+    playbook: str,
+    outcome: str,
+    notes: str | None = None,
+    plan: dict[str, Any] | None = None,
+) -> None:
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO lance_outcomes (
+                session_id, ticker, playbook, outcome, notes, plan_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                ticker.upper(),
+                playbook,
+                outcome,
+                notes,
+                _json_dumps_dict(plan),
+                utc_now_iso(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_lance_outcomes(
+    db_path: str | Path | None,
+    *,
+    ticker: str | None = None,
+    session_id: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    clauses = []
+    params: list[Any] = []
+    if ticker:
+        clauses.append("ticker = ?")
+        params.append(ticker.upper())
+    if session_id:
+        clauses.append("session_id = ?")
+        params.append(session_id)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(max(0, int(limit)))
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM lance_outcomes
+            {where}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+
+    output = []
+    for row in rows:
+        item = dict(row)
+        item["plan"] = _json_loads_dict(item.pop("plan_json", None))
+        output.append(item)
+    return output
+
+
+def insert_lance_watchlist_event(
+    db_path: str | Path | None,
+    *,
+    session_id: str,
+    ticker: str,
+    event_type: str,
+    state: str,
+    score: float,
+    data_quality: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+) -> None:
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO lance_watchlist_events (
+                session_id, ticker, event_type, state, score, data_quality_json,
+                payload_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                ticker.upper(),
+                event_type,
+                state,
+                float(score),
+                _json_dumps_dict(data_quality),
+                _json_dumps_dict(payload),
+                utc_now_iso(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_lance_watchlist_events(
+    db_path: str | Path | None,
+    *,
+    session_id: str,
+    ticker: str | None = None,
+    limit: int = 500,
+) -> list[dict[str, Any]]:
+    clauses = ["session_id = ?"]
+    params: list[Any] = [session_id]
+    if ticker:
+        clauses.append("ticker = ?")
+        params.append(ticker.upper())
+    params.append(max(0, int(limit)))
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM lance_watchlist_events
+            WHERE {' AND '.join(clauses)}
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+
+    output = []
+    for row in rows:
+        item = dict(row)
+        item["data_quality"] = _json_loads_dict(item.pop("data_quality_json", None))
+        item["payload"] = _json_loads_dict(item.pop("payload_json", None))
+        output.append(item)
+    return output
 
 
 def create_scanner_run(
