@@ -80,6 +80,7 @@ class LanceDecisionBriefService:
             "focus": focus,
             "swing_watch": swing_watch,
             "blocked": blocked,
+            "ticker_slices": _ticker_slices(focus=focus, swing_watch=swing_watch, blocked=blocked),
             "omitted": _omitted(payload.get("selection_audit")),
             "what_would_change": what_would_change,
             "talk_track": _talk_track(
@@ -151,16 +152,28 @@ def _focus_card(
         or setup.get("reason")
         or "No setup thesis supplied by the current Lance payload."
     )
-    return {
+    card = {
         "ticker": ticker,
         "lane": lane,
         "state": state,
         "playbook": playbook,
         "why": why,
+        "price": row.get("latest_price"),
+        "gap_pct": row.get("gap_pct"),
+        "rel_volume": row.get("rel_volume"),
+        "gap_basis": row.get("gap_basis"),
+        "confidence": row.get("confidence"),
+        "as_of": row.get("as_of_et") or row.get("as_of"),
         "waiting_for": _list(setup.get("waiting_for")),
         "invalidates_if": _list(setup.get("invalidates_if")),
         "data_quality": _data_quality_text(row),
     }
+    if row.get("rel_volume_basis") is not None:
+        card["rel_volume_basis"] = row.get("rel_volume_basis")
+    if lane == "swing":
+        card["bias"] = setup.get("bias") or row.get("swing_bias")
+        card["bias_reason"] = setup.get("bias_reason") or row.get("swing_bias_reason")
+    return card
 
 
 def _blocked_card(*, ticker: str, row: dict[str, Any]) -> dict[str, Any]:
@@ -175,12 +188,76 @@ def _blocked_card(*, ticker: str, row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _ticker_slices(
+    *,
+    focus: list[dict[str, Any]],
+    swing_watch: list[dict[str, Any]],
+    blocked: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows = [*focus, *swing_watch]
+    slices = []
+    for row in rows:
+        ticker = _value(row.get("ticker"))
+        slices.append({
+            "ticker": ticker,
+            "lane": _value(row.get("lane")),
+            "state": _value(row.get("state")),
+            "playbook": _value(row.get("playbook")),
+            "bias": row.get("bias"),
+            "data": _slice_data(row),
+            "why": _value(row.get("why")),
+            "watch": _join_first(row.get("waiting_for")),
+            "risk": _join_first(row.get("invalidates_if")),
+            "quality": _value(row.get("data_quality")),
+        })
+    for row in blocked:
+        slices.append({
+            "ticker": _value(row.get("ticker")),
+            "lane": "blocked",
+            "state": "blocked_data_quality",
+            "playbook": "none",
+            "bias": None,
+            "data": _value(row.get("reason")),
+            "why": _value(row.get("caveat") or row.get("reason")),
+            "watch": "fix data quality first",
+            "risk": "do not treat as live setup",
+            "quality": _value(row.get("reason")),
+        })
+    return slices
+
+
+def _slice_data(row: dict[str, Any]) -> str:
+    parts = [
+        f"price={_value(row.get('price'))}",
+        f"gap={_value(row.get('gap_pct'))}%",
+        f"rvol={_value(row.get('rel_volume'))}x",
+    ]
+    if row.get("rel_volume_basis") is not None:
+        parts.append(f"rvol_basis={_value(row.get('rel_volume_basis'))}")
+    parts.extend([
+        f"basis={_value(row.get('gap_basis'))}",
+        f"confidence={_value(row.get('confidence'))}",
+        f"as_of={_value(row.get('as_of'))}",
+    ])
+    return " ".join(parts)
+
+
+def _join_first(value: Any) -> str:
+    items = _list(value)
+    if not items:
+        return "none"
+    return "; ".join(str(item) for item in items[:2])
+
+
 def _data_quality_text(row: dict[str, Any]) -> str:
-    return (
-        f"confidence={_value(row.get('confidence'))} / "
-        f"gap_basis={_value(row.get('gap_basis'))} / "
-        f"as_of={_value(row.get('as_of_et') or row.get('as_of'))}"
-    )
+    parts = [
+        f"confidence={_value(row.get('confidence'))}",
+        f"gap_basis={_value(row.get('gap_basis'))}",
+    ]
+    if row.get("rel_volume_basis") is not None:
+        parts.append(f"rvol_basis={_value(row.get('rel_volume_basis'))}")
+    parts.append(f"as_of={_value(row.get('as_of_et') or row.get('as_of'))}")
+    return " / ".join(parts)
 
 
 def _what_would_change(

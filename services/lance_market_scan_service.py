@@ -21,10 +21,12 @@ class LanceMarketScanService:
         *,
         scanner_service: Any | None = None,
         plan_service: Any | None = None,
+        market_universe_provider: Any | None = None,
         db_path: str | Path | None = None,
     ) -> None:
         self.scanner_service = scanner_service or ScannerService(persist=False, db_path=db_path)
         self.plan_service = plan_service or LanceIntradayPlanService()
+        self.market_universe_provider = market_universe_provider
         self.db_path = db_path
 
     def scan(
@@ -34,6 +36,8 @@ class LanceMarketScanService:
         watchlist: str | list[str] | None = None,
         tickers: list[str] | str | None = None,
         all_universes: bool = False,
+        market: str | None = None,
+        market_limit: int | None = None,
         min_gap_abs: float = 3.0,
         max_candidates: int = 20,
         include_caveated_context: bool = False,
@@ -41,6 +45,25 @@ class LanceMarketScanService:
         session_id: str | None = None,
         max_workers: int = 1,
     ) -> dict[str, Any]:
+        notes: list[str] = []
+        requested_tickers = tickers
+        if market:
+            if any([universe, watchlist, tickers, all_universes]):
+                raise ValueError("Use market by itself; do not combine it with universe/watchlist/tickers/all.")
+            market_universe = self._market_universe_provider().list_symbols(market)
+            tickers = list(market_universe.symbols)
+            if market_limit is not None:
+                tickers = tickers[: max(0, int(market_limit))]
+            notes.append(
+                (
+                    f"Market universe {market} resolved {len(market_universe.symbols)} "
+                    f"symbol(s) from {market_universe.source}."
+                )
+            )
+            if market_limit is not None:
+                notes.append(f"Limited market universe to {len(tickers)} symbol(s) for testing.")
+            notes.extend(list(market_universe.notes))
+
         scan_output = self.scanner_service.scan(
             universe=universe,
             watchlist=watchlist,
@@ -55,7 +78,7 @@ class LanceMarketScanService:
             max_workers=max_workers,
         )
         resolved_session_id = session_id or _session_id(scan_output)
-        candidate_tickers = _candidate_tickers(scan_output.results, tickers)
+        candidate_tickers = _candidate_tickers(scan_output.results, requested_tickers)
         candidate_limit = max(0, int(max_candidates))
         candidate_tickers = candidate_tickers[:candidate_limit]
         candidates = [
@@ -111,7 +134,7 @@ class LanceMarketScanService:
             "candidate_count": len(candidates),
             "watchlist": limited_candidates,
             "triage_context": _triage_context(include_caveated_context),
-            "notes": list(scan_output.notes),
+            "notes": [*notes, *list(scan_output.notes)],
             "disclaimer": DISCLAIMER,
         }
 
@@ -146,6 +169,14 @@ class LanceMarketScanService:
                 "disclaimer": DISCLAIMER,
             }
 
+    def _market_universe_provider(self) -> Any:
+        if self.market_universe_provider is not None:
+            return self.market_universe_provider
+        from providers.market_universe_provider import MarketUniverseProvider
+
+        self.market_universe_provider = MarketUniverseProvider()
+        return self.market_universe_provider
+
 
 def _candidate_from_plan(ticker: str, plan: dict[str, Any]) -> dict[str, Any]:
     data_quality = plan.get("data_quality") or {}
@@ -169,6 +200,7 @@ def _candidate_from_plan(ticker: str, plan: dict[str, Any]) -> dict[str, Any]:
         "next_step": plan.get("next_step"),
         "gap_pct": data_quality.get("gap_pct"),
         "rel_volume": data_quality.get("rel_volume"),
+        "rel_volume_basis": data_quality.get("rel_volume_basis"),
         "data_quality": data_quality,
         "conditions": plan.get("conditions") or {},
         "trigger_reference": plan.get("trigger_reference"),
@@ -290,8 +322,8 @@ def _why_watching(plan: dict[str, Any]) -> str:
     confidence = data_quality.get("confidence") or "unknown"
     basis = data_quality.get("gap_basis") or "unknown_basis"
     return (
-        f"{ticker}: {gap_pct}% move, {rel_volume}x RVOL, Lance state {state}; "
-        f"data confidence={confidence}, gap_basis={basis}."
+        f"{ticker}: {gap_pct}% move, {rel_volume}x session-volume RVOL, "
+        f"Lance state {state}; data confidence={confidence}, gap_basis={basis}."
     )
 
 

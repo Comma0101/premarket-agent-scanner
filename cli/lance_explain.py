@@ -66,18 +66,21 @@ def _render(output: dict[str, Any]) -> None:
 def _render_data_quality(output: dict[str, Any]) -> None:
     data = output.get("data_quality") if isinstance(output.get("data_quality"), dict) else {}
     _section("Data Quality")
-    typer.echo(
-        " ".join([
-            f"price={_format_price(data.get('latest_price'))}",
-            f"gap={_format_pct(data.get('gap_pct'))}",
-            f"rvol={_format_multiple(data.get('rel_volume'))}",
-            f"gap_basis={_value(data.get('gap_basis'))}",
-            f"confidence={_value(data.get('confidence'))}",
-            f"status={_value(data.get('data_status'))}",
-            f"as_of={_value(data.get('as_of_et') or data.get('as_of'))}",
-            f"sources={_join(data.get('sources'))}",
-        ])
-    )
+    parts = [
+        f"price={_format_price(data.get('latest_price'))}",
+        f"gap={_format_pct(data.get('gap_pct'))}",
+        f"rvol={_format_multiple(data.get('rel_volume'))}",
+    ]
+    if data.get("rel_volume_basis") is not None:
+        parts.append(f"rvol_basis={_value(data.get('rel_volume_basis'))}")
+    parts.extend([
+        f"gap_basis={_value(data.get('gap_basis'))}",
+        f"confidence={_value(data.get('confidence'))}",
+        f"status={_value(data.get('data_status'))}",
+        f"as_of={_value(data.get('as_of_et') or data.get('as_of'))}",
+        f"sources={_join(data.get('sources'))}",
+    ])
+    typer.echo(" ".join(parts))
     if data.get("data_caveat"):
         typer.echo(f"caveat={_value(data.get('data_caveat'))}")
 
@@ -88,6 +91,8 @@ def _render_detail(title: str, value: Any) -> None:
     _section(title)
     typer.echo(f"state={_value(value.get('state'))}")
     typer.echo(f"playbook={_value(value.get('playbook'))}")
+    if value.get("bias"):
+        typer.echo(f"bias={_value(value.get('bias'))}: {_value(value.get('bias_reason'))}")
     if value.get("thesis"):
         typer.echo(f"thesis={_value(value.get('thesis'))}")
     typer.echo(f"waiting_for={_join(value.get('waiting_for'))}")

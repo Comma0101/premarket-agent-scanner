@@ -132,8 +132,11 @@ def test_lance_swing_plan_flags_relative_strength_continuation():
     assert plan["state"] == "active_watch"
     assert plan["lance_quality_grade"] == "ACTIVE_DAILY_WATCH"
     assert plan["playbook"] == "relative_strength_continuation"
+    assert plan["bias"] == "long_bias"
+    assert "relative strength continuation" in plan["bias_reason"]
     assert plan["daily_context"]["trend"] == "uptrend"
     assert plan["relative_strength"]["classification"] == "strong"
+    assert plan["data_quality"]["rel_volume_basis"] == "session_volume_vs_average_daily_volume"
     assert plan["daily_context"]["prior_day_levels"]["close"] == 120
     assert "daily close confirmation" in " ".join(plan["waiting_for"])
     assert "daily close loses" in " ".join(plan["invalidates_if"])
@@ -200,6 +203,8 @@ def test_lance_swing_plan_groups_invalidated_weak_name():
 
     plan = output["plans"][0]
     assert plan["state"] == "invalidated"
+    assert plan["bias"] == "neutral"
+    assert "No valid Lance swing setup" in plan["bias_reason"]
     assert plan["daily_context"]["trend"] == "downtrend"
     assert plan["relative_strength"]["classification"] == "weak"
     assert output["groups"]["invalidated"][0]["ticker"] == "TEST"
@@ -248,6 +253,8 @@ def test_lance_swing_plan_flags_large_pullback_as_mean_reversion_watch():
     assert plan["state"] == "mean_reversion_watch"
     assert plan["lance_quality_grade"] == "REVERSION_WATCH"
     assert plan["playbook"] == "swing_mean_reversion_reclaim"
+    assert plan["bias"] == "long_bias"
+    assert "reclaim" in plan["bias_reason"]
     assert plan["conditions"]["swing_mean_reversion"]["status"] == "PASS"
     assert "prior-day low reclaim" in " ".join(plan["waiting_for"])
     assert output["groups"]["mean_reversion_watch"][0]["ticker"] == "TEST"

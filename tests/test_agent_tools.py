@@ -34,7 +34,7 @@ def _quote(ticker, prev, pre, cap):
         latest_price=pre,
         volume=2_000_000,
         timestamp=utc_now_iso(),
-        raw={"marketCap": cap},
+        raw={"marketCap": cap, "averageVolume": 1_000_000},
     )
 
 
@@ -245,6 +245,8 @@ def test_get_ticker_snapshot_tool():
     out = tools.get_ticker_snapshot(ticker="NVDA", snapshot_service=snap_service)
     assert out["ticker"] == "NVDA"
     assert out["gap_pct"] == 4.0
+    assert out["rel_volume"] == 2.0
+    assert out["rel_volume_basis"] == "session_volume_vs_average_daily_volume"
     assert out["confidence"] == "OK"
 
 
@@ -544,6 +546,8 @@ def test_run_lance_full_cycle_tool_with_injected_service():
                 "universe": "AI_SEMIS_MEMORY",
                 "watchlist": "HOT_ACTIVE",
                 "all_universes": False,
+                "market": None,
+                "market_limit": None,
                 "min_gap_abs": 2.5,
                 "max_candidates": 7,
                 "persist": True,
@@ -584,6 +588,61 @@ def test_run_lance_full_cycle_tool_with_injected_service():
     assert out["agent_name"] == "lance_full_cycle"
     assert out["mode"] == "full_cycle"
     assert out["combined_watchlist"][0]["ticker"] == "IBM"
+
+
+def test_run_sykes_live_tool_with_injected_service():
+    class FakeSykesLiveService:
+        def run(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 100
+            assert kwargs["live_intraday"] is True
+            return {"agent_name": "timothy_sykes", "mode": "live_and_swing"}
+
+    out = tools.run_sykes_live(
+        market="us-listed",
+        market_limit=100,
+        service=FakeSykesLiveService(),
+    )
+
+    assert out["agent_name"] == "timothy_sykes"
+    assert out["mode"] == "live_and_swing"
+
+
+def test_run_trading_desk_tool_with_injected_service():
+    class FakeTradingDeskService:
+        def run(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 100
+            assert kwargs["max_workers"] == 5
+            return {"agent_name": "trading_desk", "mode": "one_run"}
+
+    out = tools.run_trading_desk(
+        market="us-listed",
+        market_limit=100,
+        max_workers=5,
+        service=FakeTradingDeskService(),
+    )
+
+    assert out["agent_name"] == "trading_desk"
+    assert out["mode"] == "one_run"
+
+
+def test_run_lance_full_cycle_tool_accepts_market_selector():
+    class FakeLanceFullCycleService:
+        def run(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 600
+            assert kwargs["all_universes"] is False
+            return {"mode": "full_cycle", "market": kwargs["market"]}
+
+    out = tools.run_lance_full_cycle(
+        market="us-listed",
+        market_limit=600,
+        service=FakeLanceFullCycleService(),
+    )
+
+    assert out["mode"] == "full_cycle"
+    assert out["market"] == "us-listed"
 
 
 def test_run_lance_full_cycle_tool_defaults_to_bounded_parallel_workers():
@@ -765,6 +824,24 @@ def test_run_lance_market_scan_tool_with_injected_service():
     assert out["watchlist"][0]["ticker"] == "IBM"
 
 
+def test_run_lance_market_scan_tool_accepts_market_selector():
+    class FakeLanceMarketScanService:
+        def scan(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 750
+            assert kwargs["all_universes"] is False
+            return {"agent_name": "lance_intraday", "selection": "us-listed"}
+
+    out = tools.run_lance_market_scan(
+        market="us-listed",
+        market_limit=750,
+        service=FakeLanceMarketScanService(),
+    )
+
+    assert out["agent_name"] == "lance_intraday"
+    assert out["selection"] == "us-listed"
+
+
 def test_update_lance_watchlist_tool_with_injected_service():
     class FakeLanceDeskUpdateService:
         def update(self, **kwargs):
@@ -809,6 +886,24 @@ def test_run_advanced_lance_scan_tool_with_injected_service():
 
     assert out["mode"] == "advanced"
     assert out["watchlist"][0]["ticker"] == "NVDA"
+
+
+def test_run_advanced_lance_scan_tool_accepts_market_selector():
+    class FakeAdvancedLanceService:
+        def scan(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 500
+            assert kwargs["all_universes"] is False
+            return {"mode": "advanced", "selection": "us-listed"}
+
+    out = tools.run_advanced_lance_scan(
+        market="us-listed",
+        market_limit=500,
+        service=FakeAdvancedLanceService(),
+    )
+
+    assert out["mode"] == "advanced"
+    assert out["selection"] == "us-listed"
 
 
 def test_journal_lance_outcome_tool_with_injected_service():
@@ -925,6 +1020,24 @@ def test_run_lance_desk_cycle_tool_with_injected_service():
     assert out["mode"] == "desk_cycle"
     assert out["session_id"] == "session-1"
     assert out["scan_summary"]["candidate_count"] == 2
+
+
+def test_run_lance_desk_cycle_tool_accepts_market_selector():
+    class FakeDeskCycleService:
+        def run(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 500
+            assert kwargs["all_universes"] is False
+            return {"mode": "desk_cycle", "selection": "us-listed"}
+
+    out = tools.run_lance_desk_cycle(
+        market="us-listed",
+        market_limit=500,
+        service=FakeDeskCycleService(),
+    )
+
+    assert out["mode"] == "desk_cycle"
+    assert out["selection"] == "us-listed"
 
 
 def test_validate_live_market_readiness_tool_with_injected_service():
@@ -1123,6 +1236,27 @@ def test_run_lance_command_center_tool_with_injected_service():
     assert out["single_run_read"]["one_liner"] == "1 active monitor."
 
 
+def test_run_lance_command_center_tool_accepts_market_selector():
+    class FakeCommandCenterService:
+        def run(self, **kwargs):
+            assert kwargs["market"] == "us-listed"
+            assert kwargs["market_limit"] == 500
+            assert kwargs["all_universes"] is False
+            return {
+                "mode": "command_center",
+                "workflow_commands": {"now": ".venv/bin/python -m cli.lance --market us-listed"},
+            }
+
+    out = tools.run_lance_command_center(
+        market="us-listed",
+        market_limit=500,
+        service=FakeCommandCenterService(),
+    )
+
+    assert out["mode"] == "command_center"
+    assert "--market us-listed" in out["workflow_commands"]["now"]
+
+
 def test_explain_lance_ticker_tool_with_injected_service():
     class FakeTickerExplainService:
         def explain(self, **kwargs):
@@ -1180,6 +1314,8 @@ def test_tool_definitions_are_well_formed():
     assert names == {
         "scan_premarket",
         "scan_small_caps",
+        "run_trading_desk",
+        "run_sykes_live",
         "list_universes",
         "get_ticker_snapshot",
         "scan_breitstein_intraday",

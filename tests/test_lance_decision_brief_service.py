@@ -84,6 +84,8 @@ def _active_payload() -> dict:
                     "swing_state": "active_watch",
                     "intraday_playbook": "mean_reversion_after_capitulation",
                     "swing_playbook": "relative_strength_continuation",
+                    "swing_bias": "long_bias",
+                    "swing_bias_reason": "Relative strength continuation is a long-bias swing watch.",
                     "latest_price": 189.25,
                     "gap_pct": 1.25,
                     "gap_basis": "premarket",
@@ -112,6 +114,8 @@ def _active_payload() -> dict:
                     "ticker": "HOOD",
                     "state": "active_watch",
                     "playbook": "relative_strength_continuation",
+                    "bias": "long_bias",
+                    "bias_reason": "Relative strength continuation is a long-bias swing watch.",
                     "state_reason": "Daily relative strength is holding.",
                     "waiting_for": ["continuation above prior high"],
                     "invalidates_if": ["daily close loses reclaim level"],
@@ -144,6 +148,9 @@ def test_decision_brief_stands_down_when_market_closed_and_data_blocked():
     assert output["talk_track"][0] == (
         "No Lance live action context: market is closed and current rows are caveated."
     )
+    assert output["ticker_slices"][0]["ticker"] == "MU"
+    assert output["ticker_slices"][0]["lane"] == "blocked"
+    assert output["ticker_slices"][0]["watch"] == "fix data quality first"
 
 
 def test_decision_brief_summarizes_active_monitor_with_confirmation_and_invalidation():
@@ -156,12 +163,37 @@ def test_decision_brief_summarizes_active_monitor_with_confirmation_and_invalida
         "lane": "intraday",
         "state": "triggered_reference",
         "playbook": "mean_reversion_after_capitulation",
-        "why": "Right-side turn after capitulation.",
-        "waiting_for": ["hold above prior 2-minute high"],
+            "why": "Right-side turn after capitulation.",
+            "price": 189.25,
+            "gap_pct": 1.25,
+            "rel_volume": 4.2,
+            "gap_basis": "premarket",
+            "confidence": "OK",
+            "as_of": "Jul 6 10:15 AM ET",
+            "waiting_for": ["hold above prior 2-minute high"],
         "invalidates_if": ["breaks prior 2-minute low"],
         "data_quality": "confidence=OK / gap_basis=premarket / as_of=Jul 6 10:15 AM ET",
     }
     assert output["swing_watch"][0]["ticker"] == "HOOD"
+    assert output["swing_watch"][0]["bias"] == "long_bias"
+    assert "long-bias" in output["swing_watch"][0]["bias_reason"]
+    assert output["ticker_slices"][0] == {
+        "ticker": "IBM",
+        "lane": "intraday",
+        "state": "triggered_reference",
+        "playbook": "mean_reversion_after_capitulation",
+        "bias": None,
+        "data": (
+            "price=189.25 gap=1.25% rvol=4.2x basis=premarket "
+            "confidence=OK as_of=Jul 6 10:15 AM ET"
+        ),
+        "why": "Right-side turn after capitulation.",
+        "watch": "hold above prior 2-minute high",
+        "risk": "breaks prior 2-minute low",
+        "quality": "confidence=OK / gap_basis=premarket / as_of=Jul 6 10:15 AM ET",
+    }
+    assert output["ticker_slices"][1]["ticker"] == "HOOD"
+    assert output["ticker_slices"][1]["bias"] == "long_bias"
     assert output["what_would_change"] == [
         "IBM: breaks prior 2-minute low",
         "HOOD: daily close loses reclaim level",

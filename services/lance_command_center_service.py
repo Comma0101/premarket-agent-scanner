@@ -42,6 +42,8 @@ class LanceCommandCenterService:
         universe: str | list[str] | None = None,
         watchlist: str | list[str] | None = None,
         all_universes: bool = False,
+        market: str | None = None,
+        market_limit: int | None = None,
         min_gap_abs: float = 3.0,
         max_candidates: int = 20,
         persist: bool = True,
@@ -61,6 +63,8 @@ class LanceCommandCenterService:
             universe=universe,
             watchlist=watchlist,
             all_universes=all_universes,
+            market=market,
+            market_limit=market_limit,
             min_gap_abs=min_gap_abs,
             max_candidates=max_candidates,
             persist=persist,
@@ -92,6 +96,8 @@ class LanceCommandCenterService:
             universe=universe,
             watchlist=watchlist,
             all_universes=all_universes,
+            market=market,
+            market_limit=market_limit,
             target_session_date=target_session_date,
             session_ids=session_ids,
         )
@@ -218,7 +224,7 @@ def _candidate_rows(full_cycle: dict[str, Any]) -> list[dict[str, Any]]:
         if not ticker:
             continue
         quality = row.get("data_quality") if isinstance(row.get("data_quality"), dict) else {}
-        rows.append({
+        output = {
             "ticker": ticker,
             "intraday_state": row.get("intraday_state"),
             "swing_state": row.get("swing_state"),
@@ -235,7 +241,13 @@ def _candidate_rows(full_cycle: dict[str, Any]) -> list[dict[str, Any]]:
             "as_of_et": quality.get("as_of_et"),
             "sources": list(quality.get("sources") or []),
             "data_caveat": quality.get("data_caveat"),
-        })
+        }
+        if quality.get("rel_volume_basis") is not None:
+            output["rel_volume_basis"] = quality.get("rel_volume_basis")
+        if row.get("swing_bias"):
+            output["swing_bias"] = row.get("swing_bias")
+            output["swing_bias_reason"] = row.get("swing_bias_reason")
+        rows.append(output)
     return rows
 
 
@@ -287,7 +299,7 @@ def _signal_quality(full_cycle: dict[str, Any]) -> list[dict[str, Any]]:
         confidence = quality.get("confidence")
         gap_basis = quality.get("gap_basis")
         as_of = quality.get("as_of_et") or quality.get("as_of")
-        output.append({
+        row_output = {
             "ticker": ticker,
             "posture": posture,
             "state": state,
@@ -302,7 +314,10 @@ def _signal_quality(full_cycle: dict[str, Any]) -> list[dict[str, Any]]:
                 f"confidence={_value(confidence)} / "
                 f"gap_basis={_value(gap_basis)} / as_of={_value(as_of)}"
             ),
-        })
+        }
+        if quality.get("rel_volume_basis") is not None:
+            row_output["rel_volume_basis"] = quality.get("rel_volume_basis")
+        output.append(row_output)
     return output
 
 
@@ -398,10 +413,19 @@ def _workflow_commands(
     universe: str | list[str] | None,
     watchlist: str | list[str] | None,
     all_universes: bool,
+    market: str | None,
+    market_limit: int | None,
     target_session_date: str | None,
     session_ids: dict[str, Any],
 ) -> dict[str, str]:
-    selection = _selection_args(tickers=tickers, universe=universe, watchlist=watchlist, all_universes=all_universes)
+    selection = _selection_args(
+        tickers=tickers,
+        universe=universe,
+        watchlist=watchlist,
+        all_universes=all_universes,
+        market=market,
+        market_limit=market_limit,
+    )
     target = f" --target-session-date {target_session_date}" if target_session_date else ""
     intraday_id = session_ids.get("intraday")
     swing_id = session_ids.get("swing")
@@ -426,6 +450,8 @@ def _selection_args(
     universe: str | list[str] | None,
     watchlist: str | list[str] | None,
     all_universes: bool,
+    market: str | None,
+    market_limit: int | None,
 ) -> str:
     parts = []
     if tickers:
@@ -436,6 +462,10 @@ def _selection_args(
         parts.append(f"--watchlist {_join_values(watchlist)}")
     if all_universes:
         parts.append("--full-universe")
+    if market:
+        parts.append(f"--market {market}")
+        if market_limit is not None:
+            parts.append(f"--market-limit {int(market_limit)}")
     return "" if not parts else " " + " ".join(parts)
 
 

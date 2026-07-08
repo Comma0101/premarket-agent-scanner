@@ -26,6 +26,12 @@ def main(
         "--all",
         help="Scan every defined universe.",
     ),
+    market: str = typer.Option(None, "--market", help="Full-market source, e.g. us-listed."),
+    market_limit: int = typer.Option(
+        None,
+        "--market-limit",
+        help="Optional cap on market symbols for bounded testing.",
+    ),
     min_gap_abs: float = typer.Option(3.0, "--min-gap-abs", help="Minimum absolute gap %."),
     max_candidates: int = typer.Option(20, "--max-candidates", help="Maximum candidates to scan."),
     persist: bool = typer.Option(False, "--persist", help="Persist scan/update state."),
@@ -59,9 +65,9 @@ def main(
     ),
     json_output: bool = typer.Option(False, "--json", help="Print the raw payload as JSON."),
 ) -> None:
-    if not any([tickers, universe, watchlist, all_universes]):
+    if not any([tickers, universe, watchlist, all_universes, market]):
         all_universes = True
-    if all_universes and not any([tickers, universe, watchlist]):
+    if (all_universes or market) and not any([tickers, universe, watchlist]):
         include_caveated_context = True
 
     if watch is not None and json_output:
@@ -73,6 +79,8 @@ def main(
         "universe": universe,
         "watchlist": watchlist,
         "all_universes": all_universes,
+        "market": market,
+        "market_limit": market_limit,
         "min_gap_abs": min_gap_abs,
         "max_candidates": max_candidates,
         "persist": persist,

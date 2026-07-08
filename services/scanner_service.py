@@ -64,11 +64,24 @@ def compute_gap_dollar(previous_close: float | None, price: float | None) -> flo
     return round(price - previous_close, 2)
 
 
+REL_VOLUME_BASIS = "session_volume_vs_average_daily_volume"
+
+
 def compute_rel_volume(volume: float | None, average_volume: float | None) -> float | None:
-    """Relative volume (RVOL) = current volume / average daily volume."""
+    """RVOL proxy = current/session volume divided by average daily volume.
+
+    This is not same-time-of-day RVOL. It is the only defensible RVOL value from
+    the current snapshot fields, so callers must carry the basis with the value.
+    """
     if volume is None or average_volume is None or average_volume == 0:
         return None
     return round(volume / average_volume, 2)
+
+
+def rel_volume_basis_for(volume: float | None, average_volume: float | None) -> str | None:
+    if compute_rel_volume(volume, average_volume) is None:
+        return None
+    return REL_VOLUME_BASIS
 
 
 def compute_float_rotation(volume: float | None, float_shares: float | None) -> float | None:
@@ -274,6 +287,7 @@ class ScannerService:
             confidence=confidence,
             notes="; ".join(snapshot.notes) if snapshot.notes else None,
             rel_volume=rel_volume,
+            rel_volume_basis=rel_volume_basis_for(snapshot.volume, snapshot.average_volume),
             gap_basis=gap_basis,
             sources=snapshot.sources,
             timestamp=snapshot.timestamp,

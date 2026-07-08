@@ -115,6 +115,8 @@ def test_json_output_returns_raw_run_lance_desk_cycle_payload(monkeypatch):
         "universe": None,
         "watchlist": "hot_active",
         "all_universes": False,
+        "market": None,
+        "market_limit": None,
         "min_gap_abs": 3.0,
         "max_candidates": 20,
         "persist": False,
@@ -144,6 +146,29 @@ def test_no_selection_defaults_to_all_universes(monkeypatch):
     assert result.exit_code == 0
     assert calls[0]["all_universes"] is True
     assert calls[0]["max_candidates"] == 5
+    assert calls[0]["include_caveated_context"] is True
+
+
+def test_market_selector_does_not_default_to_all_universes(monkeypatch):
+    from cli import lance_desk_cycle
+
+    calls: list[dict] = []
+
+    def fake_run_lance_desk_cycle(**kwargs):
+        calls.append(kwargs)
+        return _payload()
+
+    monkeypatch.setattr(lance_desk_cycle, "run_lance_desk_cycle", fake_run_lance_desk_cycle)
+
+    result = runner.invoke(
+        lance_desk_cycle.app,
+        ["--market", "us-listed", "--market-limit", "500", "--json"],
+    )
+
+    assert result.exit_code == 0
+    assert calls[0]["market"] == "us-listed"
+    assert calls[0]["market_limit"] == 500
+    assert calls[0]["all_universes"] is False
     assert calls[0]["include_caveated_context"] is True
 
 

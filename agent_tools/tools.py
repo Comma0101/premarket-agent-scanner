@@ -51,6 +51,7 @@ def _result_to_dict(result: ScannerResult) -> dict[str, Any]:
         "gap_basis": result.gap_basis,
         "volume": result.volume,
         "rel_volume": result.rel_volume,
+        "rel_volume_basis": result.rel_volume_basis,
         "confidence": result.confidence,
         "notes": result.notes,
         "sources": result.sources,
@@ -143,6 +144,7 @@ def _small_cap_candidate_to_dict(candidate: Any) -> dict[str, Any]:
         "gap_basis": candidate.gap_basis,
         "volume": candidate.volume,
         "rel_volume": candidate.rel_volume,
+        "rel_volume_basis": getattr(candidate, "rel_volume_basis", None),
         "confidence": candidate.confidence,
         "score": candidate.score,
         "grade": candidate.grade,
@@ -335,6 +337,7 @@ def get_ticker_snapshot(
         compute_gap_pct,
         compute_rel_volume,
         gap_basis_for,
+        rel_volume_basis_for,
     )
 
     # Use the same provider construction as the scan path so a single-ticker
@@ -355,6 +358,7 @@ def get_ticker_snapshot(
         "market_cap": snap.market_cap,
         "volume": snap.volume,
         "rel_volume": compute_rel_volume(snap.volume, snap.average_volume),
+        "rel_volume_basis": rel_volume_basis_for(snap.volume, snap.average_volume),
         "confidence": snap.confidence,
         "data_status": snap.data_status,
         "provider_failures": dict(snap.provider_failures),
@@ -554,6 +558,8 @@ def run_lance_full_cycle(
     universe: str | list[str] | None = None,
     watchlist: str | list[str] | None = None,
     all_universes: bool = False,
+    market: str | None = None,
+    market_limit: int | None = None,
     min_gap_abs: float = 3.0,
     max_candidates: int = 20,
     persist: bool = True,
@@ -579,6 +585,8 @@ def run_lance_full_cycle(
         universe=universe,
         watchlist=watchlist,
         all_universes=all_universes,
+        market=market,
+        market_limit=market_limit,
         min_gap_abs=min_gap_abs,
         max_candidates=max_candidates,
         persist=persist,
@@ -591,6 +599,66 @@ def run_lance_full_cycle(
         review_limit=review_limit,
         target_session_date=target_session_date,
         summary_limit=summary_limit,
+    )
+
+
+def run_sykes_live(
+    *,
+    tickers: list[str] | str | None = None,
+    universe: str | list[str] | None = None,
+    watchlist: str | list[str] | None = None,
+    market: str | None = "us-listed",
+    market_limit: int | None = None,
+    max_workers: int | None = 6,
+    include_rejected: bool = False,
+    live_intraday: bool = True,
+    summary_limit: int = 10,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    if service is None:
+        from services.sykes_live_plan_service import SykesLivePlanService
+
+        service = SykesLivePlanService()
+
+    return service.run(
+        tickers=tickers,
+        universe=universe,
+        watchlist=watchlist,
+        market=market,
+        market_limit=market_limit,
+        max_workers=max_workers,
+        include_rejected=include_rejected,
+        live_intraday=live_intraday,
+        summary_limit=summary_limit,
+    )
+
+
+def run_trading_desk(
+    *,
+    tickers: list[str] | str | None = None,
+    universe: str | list[str] | None = None,
+    watchlist: str | list[str] | None = None,
+    market: str | None = "us-listed",
+    market_limit: int | None = None,
+    max_workers: int = 6,
+    summary_limit: int = 8,
+    persist: bool = False,
+    service: Any | None = None,
+) -> dict[str, Any]:
+    if service is None:
+        from services.trading_desk_service import TradingDeskService
+
+        service = TradingDeskService()
+
+    return service.run(
+        tickers=tickers,
+        universe=universe,
+        watchlist=watchlist,
+        market=market,
+        market_limit=market_limit,
+        max_workers=max_workers,
+        summary_limit=summary_limit,
+        persist=persist,
     )
 
 
@@ -614,6 +682,8 @@ def run_lance_command_center(
     universe: str | list[str] | None = None,
     watchlist: str | list[str] | None = None,
     all_universes: bool = False,
+    market: str | None = None,
+    market_limit: int | None = None,
     min_gap_abs: float = 3.0,
     max_candidates: int = 20,
     persist: bool = True,
@@ -640,6 +710,8 @@ def run_lance_command_center(
         universe=universe,
         watchlist=watchlist,
         all_universes=all_universes,
+        market=market,
+        market_limit=market_limit,
         min_gap_abs=min_gap_abs,
         max_candidates=max_candidates,
         persist=persist,
@@ -828,6 +900,8 @@ def run_lance_market_scan(
     universe: str | list[str] | None = None,
     watchlist: str | list[str] | None = None,
     all_universes: bool = False,
+    market: str | None = None,
+    market_limit: int | None = None,
     min_gap_abs: float = 3.0,
     max_candidates: int = 20,
     include_caveated_context: bool = False,
@@ -836,7 +910,7 @@ def run_lance_market_scan(
     max_workers: int = 1,
     service: Any | None = None,
 ) -> dict[str, Any]:
-    if not any([tickers, universe, watchlist, all_universes]):
+    if not any([tickers, universe, watchlist, all_universes, market]):
         all_universes = True
 
     if service is None:
@@ -849,6 +923,8 @@ def run_lance_market_scan(
         universe=universe,
         watchlist=watchlist,
         all_universes=all_universes,
+        market=market,
+        market_limit=market_limit,
         min_gap_abs=min_gap_abs,
         max_candidates=max_candidates,
         include_caveated_context=include_caveated_context,
@@ -883,6 +959,8 @@ def run_advanced_lance_scan(
     universe: str | list[str] | None = None,
     watchlist: str | list[str] | None = None,
     all_universes: bool = False,
+    market: str | None = None,
+    market_limit: int | None = None,
     min_gap_abs: float = 3.0,
     max_candidates: int = 20,
     include_caveated_context: bool = False,
@@ -891,7 +969,7 @@ def run_advanced_lance_scan(
     max_workers: int = 1,
     service: Any | None = None,
 ) -> dict[str, Any]:
-    if not any([tickers, universe, watchlist, all_universes]):
+    if not any([tickers, universe, watchlist, all_universes, market]):
         all_universes = True
 
     if service is None:
@@ -904,6 +982,8 @@ def run_advanced_lance_scan(
         universe=universe,
         watchlist=watchlist,
         all_universes=all_universes,
+        market=market,
+        market_limit=market_limit,
         min_gap_abs=min_gap_abs,
         max_candidates=max_candidates,
         include_caveated_context=include_caveated_context,
@@ -999,6 +1079,8 @@ def run_lance_desk_cycle(
     universe: str | list[str] | None = None,
     watchlist: str | list[str] | None = None,
     all_universes: bool = False,
+    market: str | None = None,
+    market_limit: int | None = None,
     min_gap_abs: float = 3.0,
     max_candidates: int = 20,
     persist: bool = True,
@@ -1021,6 +1103,8 @@ def run_lance_desk_cycle(
         universe=universe,
         watchlist=watchlist,
         all_universes=all_universes,
+        market=market,
+        market_limit=market_limit,
         min_gap_abs=min_gap_abs,
         max_candidates=max_candidates,
         persist=persist,

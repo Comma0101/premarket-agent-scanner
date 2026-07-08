@@ -8,6 +8,7 @@ from services.scanner_service import (
     compute_gap_pct,
     compute_rel_volume,
     gap_basis_for,
+    rel_volume_basis_for,
 )
 from services.session_time_service import data_caveat_for, format_et, session_mode_for
 
@@ -203,6 +204,7 @@ def _data_quality(snapshot: CombinedSnapshot) -> dict[str, Any]:
         "gap_dollar": gap_dollar,
         "volume": snapshot.volume,
         "rel_volume": rel_volume,
+        "rel_volume_basis": rel_volume_basis_for(snapshot.volume, snapshot.average_volume),
         "market_cap": snapshot.market_cap,
         "sources": list(snapshot.sources),
     }
@@ -242,7 +244,7 @@ def _conditions(
         "participation": _threshold_condition(
             value=rel_volume,
             floor=LANCE_RVOL_FLOOR,
-            unit="x RVOL",
+            unit="x session-volume RVOL",
         ),
         "intraday_bars": _condition(
             "PASS" if bar_count >= 4 else "UNKNOWN",

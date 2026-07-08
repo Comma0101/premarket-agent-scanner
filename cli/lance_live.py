@@ -28,6 +28,12 @@ def main(
         "--full-universe",
         help="Use every configured universe.",
     ),
+    market: str | None = typer.Option(None, "--market", help="Full-market source, e.g. us-listed."),
+    market_limit: int | None = typer.Option(
+        None,
+        "--market-limit",
+        help="Optional cap on market symbols for bounded testing.",
+    ),
     min_gap_abs: float = typer.Option(3.0, "--min-gap-abs", help="Intraday minimum move %."),
     max_candidates: int = typer.Option(20, "--max-candidates", help="Intraday candidate cap."),
     persist: bool = typer.Option(True, "--persist/--no-persist", help="Persist Lance session state."),
@@ -78,9 +84,9 @@ def main(
     ),
     json_output: bool = typer.Option(False, "--json", help="Print raw JSON."),
 ) -> None:
-    if not any([tickers, universe, watchlist, all_universes]):
+    if not any([tickers, universe, watchlist, all_universes, market]):
         all_universes = True
-    if all_universes and include_caveated_context is None:
+    if (all_universes or market) and include_caveated_context is None:
         include_caveated_context = True
     if watch is not None and json_output:
         typer.echo("--json cannot be combined with --watch")
@@ -91,6 +97,8 @@ def main(
         "universe": universe,
         "watchlist": watchlist,
         "all_universes": all_universes,
+        "market": market,
+        "market_limit": market_limit,
         "min_gap_abs": min_gap_abs,
         "max_candidates": max_candidates,
         "persist": persist,
@@ -214,6 +222,7 @@ def _render_decision_brief(payload: dict[str, Any]) -> None:
         typer.echo(_value(brief.get("headline")))
     for line in brief.get("talk_track") or []:
         typer.echo(f"talk={_value(line)}")
+    _render_ticker_slices(brief)
     for row in brief.get("focus") or []:
         if not isinstance(row, dict):
             continue
@@ -225,6 +234,7 @@ def _render_decision_brief(payload: dict[str, Any]) -> None:
                 _value(row.get("playbook")),
             ])
         )
+        typer.echo(f"  metrics={_brief_metrics(row)}")
         if row.get("data_quality"):
             typer.echo(f"  data={_value(row.get('data_quality'))}")
         if row.get("why"):
@@ -243,6 +253,9 @@ def _render_decision_brief(payload: dict[str, Any]) -> None:
                 _value(row.get("playbook")),
             ])
         )
+        typer.echo(f"  metrics={_brief_metrics(row)}")
+        if row.get("bias"):
+            typer.echo(f"  bias={_value(row.get('bias'))}: {_value(row.get('bias_reason'))}")
         if row.get("data_quality"):
             typer.echo(f"  data={_value(row.get('data_quality'))}")
         if row.get("why"):
@@ -255,6 +268,28 @@ def _render_decision_brief(payload: dict[str, Any]) -> None:
             typer.echo(f"  caveat={_value(row.get('caveat'))}")
     for item in brief.get("what_would_change") or []:
         typer.echo(f"change {_value(item)}")
+
+
+def _render_ticker_slices(brief: dict[str, Any]) -> None:
+    slices = [row for row in brief.get("ticker_slices") or [] if isinstance(row, dict)]
+    if not slices:
+        return
+    typer.echo("Auto Slices")
+    for row in slices:
+        typer.echo(
+            " ".join([
+                f"slice {_value(row.get('ticker'))}",
+                _value(row.get("lane")),
+                _value(row.get("state")),
+                _value(row.get("playbook")),
+            ])
+        )
+        typer.echo(f"  data={_value(row.get('data'))}")
+        if row.get("bias"):
+            typer.echo(f"  bias={_value(row.get('bias'))}")
+        typer.echo(f"  why={_value(row.get('why'))}")
+        typer.echo(f"  watch={_value(row.get('watch'))}")
+        typer.echo(f"  risk={_value(row.get('risk'))}")
 
 
 def _render_selection_audit(payload: dict[str, Any]) -> None:
@@ -463,6 +498,22 @@ def _join(values: Any) -> str:
     if not isinstance(values, list) or not values:
         return "none"
     return ", ".join(_value(value) for value in values)
+
+
+def _brief_metrics(row: dict[str, Any]) -> str:
+    parts = [
+        f"price={_value(row.get('price'))}",
+        f"gap={_value(row.get('gap_pct'))}%",
+        f"rvol={_value(row.get('rel_volume'))}x",
+    ]
+    if row.get("rel_volume_basis") is not None:
+        parts.append(f"rvol_basis={_value(row.get('rel_volume_basis'))}")
+    parts.extend([
+        f"basis={_value(row.get('gap_basis'))}",
+        f"confidence={_value(row.get('confidence'))}",
+        f"as_of={_value(row.get('as_of'))}",
+    ])
+    return " ".join(parts)
 
 
 def _value(value: Any) -> str:

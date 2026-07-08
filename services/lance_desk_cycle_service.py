@@ -59,6 +59,8 @@ class LanceDeskCycleService:
         universe: str | list[str] | None = None,
         watchlist: str | list[str] | None = None,
         all_universes: bool = False,
+        market: str | None = None,
+        market_limit: int | None = None,
         min_gap_abs: float = 3.0,
         max_candidates: int = 20,
         persist: bool = True,
@@ -70,7 +72,7 @@ class LanceDeskCycleService:
         target_session_date: str | None = None,
         summary_limit: int = 5,
     ) -> dict[str, Any]:
-        if not any([tickers, universe, watchlist, all_universes]):
+        if not any([tickers, universe, watchlist, all_universes, market]):
             all_universes = True
 
         scan = self.scan_service.scan(
@@ -78,6 +80,8 @@ class LanceDeskCycleService:
             universe=universe,
             watchlist=watchlist,
             all_universes=all_universes,
+            market=market,
+            market_limit=market_limit,
             min_gap_abs=min_gap_abs,
             max_candidates=max_candidates,
             persist=persist,

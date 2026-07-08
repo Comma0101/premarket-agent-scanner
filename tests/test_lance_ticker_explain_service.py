@@ -33,12 +33,15 @@ def _payload() -> dict:
                     "swing_state": "active_watch",
                     "intraday_playbook": "mean_reversion_after_capitulation",
                     "swing_playbook": "relative_strength_continuation",
+                    "swing_bias": "long_bias",
+                    "swing_bias_reason": "relative strength continuation is a long-bias swing watch.",
                     "latest_price": 189.25,
                     "gap_pct": 1.25,
                     "gap_basis": "premarket",
                     "confidence": "OK",
                     "data_status": "live",
                     "rel_volume": 4.2,
+                    "rel_volume_basis": "session_volume_vs_average_daily_volume",
                     "volume": 1250000,
                     "as_of": None,
                     "as_of_et": "Jul 3 9:45 AM ET",
@@ -57,6 +60,7 @@ def _payload() -> dict:
                     "confidence": "STALE_DATA",
                     "data_status": "stale",
                     "rel_volume": None,
+                    "rel_volume_basis": None,
                     "volume": None,
                     "as_of": None,
                     "as_of_et": "Jul 2 4:00 PM ET",
@@ -93,6 +97,8 @@ def _payload() -> dict:
                     "ticker": "IBM",
                     "state": "active_watch",
                     "playbook": "relative_strength_continuation",
+                    "bias": "long_bias",
+                    "bias_reason": "relative strength continuation is a long-bias swing watch.",
                     "waiting_for": ["daily continuation above prior high"],
                     "invalidates_if": ["daily close loses reclaim level"],
                     "state_reason": "Daily relative strength is holding.",
@@ -120,6 +126,7 @@ def test_lance_ticker_explain_returns_found_evidence_card():
         "confidence": "OK",
         "data_status": "live",
         "rel_volume": 4.2,
+        "rel_volume_basis": "session_volume_vs_average_daily_volume",
         "volume": 1250000,
         "as_of": None,
         "as_of_et": "Jul 3 9:45 AM ET",
@@ -127,6 +134,8 @@ def test_lance_ticker_explain_returns_found_evidence_card():
         "data_caveat": None,
     }
     assert output["intraday"]["waiting_for"] == ["hold above prior 2-minute high"]
+    assert output["lance_state"]["swing_bias"] == "long_bias"
+    assert output["swing"]["bias"] == "long_bias"
     assert output["swing"]["invalidates_if"] == ["daily close loses reclaim level"]
     assert output["benchmark_context"][0]["ticker"] == "SPY"
     assert output["source_paths"] == [

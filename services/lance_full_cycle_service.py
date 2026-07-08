@@ -42,6 +42,8 @@ class LanceFullCycleService:
         universe: str | list[str] | None = None,
         watchlist: str | list[str] | None = None,
         all_universes: bool = False,
+        market: str | None = None,
+        market_limit: int | None = None,
         min_gap_abs: float = 3.0,
         max_candidates: int = 20,
         persist: bool = True,
@@ -55,7 +57,7 @@ class LanceFullCycleService:
         target_session_date: str | None = None,
         summary_limit: int = 5,
     ) -> dict[str, Any]:
-        if not any([tickers, universe, watchlist, all_universes]):
+        if not any([tickers, universe, watchlist, all_universes, market]):
             all_universes = True
         resolved_include_caveated_context = _include_caveated_context_default(
             include_caveated_context=include_caveated_context,
@@ -63,6 +65,7 @@ class LanceFullCycleService:
             universe=universe,
             watchlist=watchlist,
             all_universes=all_universes,
+            market=market,
         )
 
         intraday = self.desk_cycle_service.run(
@@ -70,6 +73,8 @@ class LanceFullCycleService:
             universe=universe,
             watchlist=watchlist,
             all_universes=all_universes,
+            market=market,
+            market_limit=market_limit,
             min_gap_abs=min_gap_abs,
             max_candidates=max_candidates,
             persist=persist,
@@ -86,6 +91,8 @@ class LanceFullCycleService:
             universe=universe,
             watchlist=watchlist,
             all_universes=all_universes,
+            market=market,
+            market_limit=market_limit,
             intraday=intraday,
         )
         if swing_scope["skip_swing"]:
@@ -132,6 +139,8 @@ class LanceFullCycleService:
             "session_workflow": _session_workflow(
                 persisted=persist,
                 full_universe=all_universes,
+                market=market,
+                market_limit=market_limit,
                 include_caveated_context=resolved_include_caveated_context,
                 intraday_session_id=intraday.get("session_id"),
                 swing_session_id=swing.get("session_id"),
@@ -226,6 +235,8 @@ def _session_workflow(
     *,
     persisted: bool,
     full_universe: bool,
+    market: str | None,
+    market_limit: int | None,
     include_caveated_context: bool,
     intraday_session_id: Any,
     swing_session_id: Any,
@@ -251,6 +262,9 @@ def _session_workflow(
             "Journal observed outcomes only after manual chart review; use unknown when not reviewed."
         ),
     }
+    if market:
+        workflow["market"] = market
+        workflow["market_limit"] = market_limit
     if triage:
         workflow.update(triage)
     return workflow
@@ -263,10 +277,11 @@ def _include_caveated_context_default(
     universe: str | list[str] | None,
     watchlist: str | list[str] | None,
     all_universes: bool,
+    market: str | None,
 ) -> bool:
     if include_caveated_context is not None:
         return bool(include_caveated_context)
-    return bool(all_universes and not any([tickers, universe, watchlist]))
+    return bool((all_universes or market) and not any([tickers, universe, watchlist]))
 
 
 def _swing_scope(
@@ -275,9 +290,12 @@ def _swing_scope(
     universe: str | list[str] | None,
     watchlist: str | list[str] | None,
     all_universes: bool,
+    market: str | None,
+    market_limit: int | None,
     intraday: dict[str, Any],
 ) -> dict[str, Any]:
-    if not all_universes or any([tickers, universe, watchlist]):
+    broad_scan = bool(all_universes or market)
+    if not broad_scan or any([tickers, universe, watchlist]):
         return {
             "tickers": tickers,
             "universe": universe,
@@ -290,12 +308,16 @@ def _swing_scope(
         }
 
     triage_tickers = _tickers_from_rows(intraday.get("top_watchlist") or [])
+    triage_mode = "market_intraday_first" if market else "full_universe_intraday_first"
     workflow = {
-        "triage_mode": "full_universe_intraday_first",
+        "triage_mode": triage_mode,
         "swing_scope": "intraday_triage",
         "swing_scope_count": len(triage_tickers),
         "triage_note": "Swing scope came from the intraday triage shortlist.",
     }
+    if market:
+        workflow["market"] = market
+        workflow["market_limit"] = market_limit
     if not triage_tickers:
         workflow["triage_note"] = (
             "No intraday triage tickers passed the broad scan; swing deep analysis was skipped."
@@ -541,6 +563,8 @@ def _combined_watchlist(
         combined["lanes"].append("swing")
         combined["swing_state"] = row.get("state")
         combined["swing_playbook"] = row.get("playbook")
+        combined["swing_bias"] = row.get("bias")
+        combined["swing_bias_reason"] = row.get("bias_reason")
         combined["swing_score"] = row.get("score")
         if not combined.get("data_quality"):
             combined["data_quality"] = _data_quality(row)
@@ -598,7 +622,7 @@ def _desk_read(
 
 def _desk_row(row: dict[str, Any]) -> dict[str, Any]:
     quality = row.get("data_quality") if isinstance(row.get("data_quality"), dict) else {}
-    return {
+    output = {
         "ticker": row.get("ticker"),
         "intraday_state": row.get("intraday_state"),
         "swing_state": row.get("swing_state"),
@@ -606,6 +630,9 @@ def _desk_row(row: dict[str, Any]) -> dict[str, Any]:
         "gap_basis": quality.get("gap_basis"),
         "as_of_et": quality.get("as_of_et") or quality.get("as_of"),
     }
+    if row.get("swing_bias"):
+        output["swing_bias"] = row.get("swing_bias")
+    return output
 
 
 def _is_blocked_or_caveated(row: dict[str, Any]) -> bool:
@@ -687,6 +714,8 @@ def _compact_swing_rows(
             "state": row.get("state"),
             "grade": row.get("lance_quality_grade"),
             "playbook": row.get("playbook"),
+            "bias": row.get("bias"),
+            "bias_reason": row.get("bias_reason"),
             "score": row.get("score"),
             "state_reason": row.get("state_reason"),
             "data_quality": _data_quality(row),
@@ -714,6 +743,8 @@ def _base_row(ticker: str) -> dict[str, Any]:
         "swing_state": None,
         "intraday_playbook": None,
         "swing_playbook": None,
+        "swing_bias": None,
+        "swing_bias_reason": None,
         "intraday_score": None,
         "swing_score": None,
         "data_quality": {},

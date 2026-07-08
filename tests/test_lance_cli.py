@@ -102,6 +102,22 @@ def _payload() -> dict:
                     "caveat": "POST_MARKET: last_trade / STALE_DATA",
                 }
             ],
+            "ticker_slices": [
+                {
+                    "ticker": "IBM",
+                    "lane": "intraday",
+                    "state": "triggered_reference",
+                    "playbook": "mean_reversion_after_capitulation",
+                    "data": (
+                        "price=189.25 gap=1.25% rvol=4.2x basis=premarket "
+                        "confidence=OK as_of=Jul 3 9:45 AM ET"
+                    ),
+                    "why": "Right-side turn after capitulation.",
+                    "watch": "hold above prior 2-minute high",
+                    "risk": "breaks prior 2-minute low",
+                    "quality": "confidence=OK / gap_basis=premarket / as_of=Jul 3 9:45 AM ET",
+                }
+            ],
             "omitted": [{"ticker": "ARM", "reason": "filtered out"}],
             "what_would_change": [
                 "Resolve stale/off-session data before treating rows as live.",
@@ -255,6 +271,9 @@ def test_lance_cli_prints_command_center(monkeypatch):
     assert "Lance Decision Brief" in result.stdout
     assert "posture=stand_down" in result.stdout
     assert "Stand down: market is closed" in result.stdout
+    assert "Auto Slices" in result.stdout
+    assert "slice IBM intraday triggered_reference mean_reversion_after_capitulation" in result.stdout
+    assert "watch=hold above prior 2-minute high" in result.stdout
     assert "focus IBM intraday triggered_reference mean_reversion_after_capitulation" in result.stdout
     assert "blocked AAOI confidence=STALE_DATA / gap_basis=last_trade / status=stale" in result.stdout
     assert "change IBM: breaks prior 2-minute low" in result.stdout
@@ -293,6 +312,27 @@ def test_lance_cli_json_prints_raw_payload(monkeypatch):
     monkeypatch.setattr(lance, "run_lance_command_center", lambda **kwargs: _payload())
 
     result = runner.invoke(lance.app, ["--tickers", "IBM", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["mode"] == "command_center"
+
+
+def test_lance_cli_forwards_market_selector_without_defaulting_all_universes(monkeypatch):
+    from cli import lance
+
+    def fake_run(**kwargs):
+        assert kwargs["market"] == "us-listed"
+        assert kwargs["market_limit"] == 500
+        assert kwargs["all_universes"] is False
+        assert kwargs["include_caveated_context"] is True
+        return _payload()
+
+    monkeypatch.setattr(lance, "run_lance_command_center", fake_run)
+
+    result = runner.invoke(
+        lance.app,
+        ["--market", "us-listed", "--market-limit", "500", "--json"],
+    )
 
     assert result.exit_code == 0
     assert json.loads(result.stdout)["mode"] == "command_center"

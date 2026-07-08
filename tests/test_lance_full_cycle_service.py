@@ -182,6 +182,8 @@ def test_lance_full_cycle_runs_intraday_and_swing_cycles_and_combines_by_ticker(
         "universe": "AI_SEMIS_MEMORY",
         "watchlist": "HOT_ACTIVE",
         "all_universes": False,
+        "market": None,
+        "market_limit": None,
         "min_gap_abs": 2.5,
         "max_candidates": 7,
         "persist": True,
@@ -314,6 +316,8 @@ def test_lance_full_cycle_full_universe_uses_intraday_triage_for_swing_scope():
         "universe": None,
         "watchlist": None,
         "all_universes": True,
+        "market": None,
+        "market_limit": None,
         "min_gap_abs": 3.0,
         "max_candidates": 7,
         "persist": True,
@@ -359,6 +363,56 @@ def test_lance_full_cycle_full_universe_uses_intraday_triage_for_swing_scope():
         == "MU"
     )
     assert output["handoff_prompt"]
+
+
+def test_lance_full_cycle_market_scan_uses_intraday_triage_for_swing_scope():
+    desk = FakeDeskCycleService()
+    swing = FakeSwingCycleService()
+
+    output = LanceFullCycleService(
+        desk_cycle_service=desk,
+        swing_cycle_service=swing,
+    ).run(
+        market="us-listed",
+        market_limit=600,
+        max_candidates=7,
+        summary_limit=4,
+    )
+
+    assert desk.calls == [{
+        "tickers": None,
+        "universe": None,
+        "watchlist": None,
+        "all_universes": False,
+        "market": "us-listed",
+        "market_limit": 600,
+        "min_gap_abs": 3.0,
+        "max_candidates": 7,
+        "persist": True,
+        "session_id": None,
+        "max_workers": 1,
+        "include_caveated_context": True,
+        "update_limit": 50,
+        "review_limit": 500,
+        "target_session_date": None,
+        "summary_limit": 4,
+    }]
+    assert swing.calls == [{
+        "tickers": ["IBM"],
+        "universe": None,
+        "watchlist": None,
+        "all_universes": False,
+        "lookback_days": 60,
+        "persist": True,
+        "session_id": None,
+        "summary_limit": 4,
+    }]
+    assert output["session_workflow"]["full_universe"] is False
+    assert output["session_workflow"]["market"] == "us-listed"
+    assert output["session_workflow"]["market_limit"] == 600
+    assert output["session_workflow"]["triage_mode"] == "market_intraday_first"
+    assert output["session_workflow"]["swing_scope"] == "intraday_triage"
+    assert output["session_workflow"]["include_caveated_context"] is True
 
 
 def test_lance_full_cycle_full_universe_skips_swing_when_triage_is_empty():

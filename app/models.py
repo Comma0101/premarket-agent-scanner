@@ -210,6 +210,9 @@ class ScannerResult:
     confidence: Confidence
     notes: str | None
     rel_volume: float | None = None
+    # Basis for rel_volume. Current scanner RVOL is session/current volume vs
+    # average daily volume; it is not same-time-of-day intraday RVOL.
+    rel_volume_basis: str | None = None
     gap_dollar: float | None = None
     # What the gap's effective price actually is: "premarket" (genuine premarket
     # quote), "last_trade" (most recent regular/last trade — off-session this is a
@@ -284,6 +287,7 @@ class SmallCapCandidate:
     confidence: Confidence
     score: int
     grade: SmallCapGrade
+    rel_volume_basis: str | None = None
     gap_basis: str | None = None
     matched_signals: list[str] = field(default_factory=list)
     missing_fields: list[str] = field(default_factory=list)

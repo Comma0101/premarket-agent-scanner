@@ -134,6 +134,14 @@ For a quick live smoke test, limit the number of market symbols:
 python -m cli.run_agent --market us-listed --market-limit 25 --json
 ```
 
+Run Lance's full intraday-plus-swing command center over the US-listed market:
+
+```bash
+python -m cli.lance_live --market us-listed --summary-limit 10 --max-candidates 30 --max-workers 8
+```
+
+For a bounded Lance smoke test, add `--market-limit 300 --no-persist --no-write-handoff`.
+
 The default workflow is `sykes_small_cap_watchlist`. It does not impersonate
 Timothy Sykes, does not place orders, and does not produce buy/sell advice. It
 packages scanner evidence so the driving agent can communicate grounded

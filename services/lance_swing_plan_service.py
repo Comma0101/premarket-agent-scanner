@@ -9,6 +9,7 @@ from services.scanner_service import (
     compute_gap_pct,
     compute_rel_volume,
     gap_basis_for,
+    rel_volume_basis_for,
 )
 from services.session_time_service import data_caveat_for, format_et, session_mode_for
 
@@ -108,6 +109,7 @@ class LanceSwingPlanService:
             conditions=conditions,
         )
         playbook = _playbook(state, daily_context, relative_strength)
+        bias = _bias(state)
         score = _score(state, daily_context, relative_strength)
 
         return {
@@ -118,6 +120,8 @@ class LanceSwingPlanService:
             "state_reason": _state_reason(state),
             "lance_quality_grade": _quality_grade(state),
             "playbook": playbook,
+            "bias": bias,
+            "bias_reason": _bias_reason(state),
             "score": score,
             "data_quality": data_quality,
             "daily_context": daily_context,
@@ -237,6 +241,7 @@ def _data_quality(snapshot: CombinedSnapshot) -> dict[str, Any]:
         "gap_dollar": compute_gap_dollar(snapshot.previous_close, price),
         "volume": snapshot.volume,
         "rel_volume": compute_rel_volume(snapshot.volume, snapshot.average_volume),
+        "rel_volume_basis": rel_volume_basis_for(snapshot.volume, snapshot.average_volume),
         "market_cap": snapshot.market_cap,
         "sources": list(snapshot.sources),
     }
@@ -493,6 +498,22 @@ def _quality_grade(state: str) -> str:
     }.get(state, "CONTEXT")
 
 
+def _bias(state: str) -> str:
+    if state in {"active_watch", "mean_reversion_watch", "confirmation_needed"}:
+        return "long_bias"
+    return "neutral"
+
+
+def _bias_reason(state: str) -> str:
+    return {
+        "active_watch": "relative strength continuation is a long-bias swing watch.",
+        "mean_reversion_watch": "Mean-reversion reclaim is a long-bias watch only after reclaim/stabilization.",
+        "confirmation_needed": "Constructive daily structure is long-bias only after confirmation.",
+        "invalidated": "No valid Lance swing setup; neutral until structure repairs.",
+        "blocked_data_quality": "Data quality blocks directional bias.",
+    }.get(state, "No clean Lance swing bias is present.")
+
+
 def _state_reason(state: str) -> str:
     return {
         "active_watch": "Daily trend and relative strength are aligned.",
@@ -617,6 +638,8 @@ def _plan_summary(plan: dict[str, Any]) -> dict[str, Any]:
         "state": plan["state"],
         "lance_quality_grade": plan["lance_quality_grade"],
         "playbook": plan["playbook"],
+        "bias": plan["bias"],
+        "bias_reason": plan["bias_reason"],
         "score": plan["score"],
         "state_reason": plan["state_reason"],
         "waiting_for": plan["waiting_for"],

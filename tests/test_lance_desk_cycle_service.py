@@ -172,6 +172,8 @@ def test_lance_desk_cycle_runs_advanced_scan_update_timeline_review_and_carryove
         "universe": None,
         "watchlist": None,
         "all_universes": False,
+        "market": None,
+        "market_limit": None,
         "min_gap_abs": 3.0,
         "max_candidates": 2,
         "persist": True,

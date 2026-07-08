@@ -517,6 +517,7 @@ def _candidate(
         confidence=result.confidence,
         score=score,
         grade=grade,
+        rel_volume_basis=result.rel_volume_basis,
         gap_basis=result.gap_basis,
         matched_signals=matched,
         missing_fields=missing_fields,

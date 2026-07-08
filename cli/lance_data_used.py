@@ -85,7 +85,7 @@ def _candidate_rows_from_full_cycle(payload: dict[str, Any]) -> list[dict[str, A
 
 def _candidate_row_from_full_cycle(row: dict[str, Any]) -> dict[str, Any]:
     data_quality = row.get("data_quality") if isinstance(row.get("data_quality"), dict) else {}
-    return {
+    output = {
         "ticker": row.get("ticker"),
         "intraday_state": row.get("intraday_state") or row.get("state"),
         "swing_state": row.get("swing_state"),
@@ -103,6 +103,12 @@ def _candidate_row_from_full_cycle(row: dict[str, Any]) -> dict[str, Any]:
         "sources": data_quality.get("sources") or [],
         "data_caveat": data_quality.get("data_caveat"),
     }
+    if data_quality.get("rel_volume_basis") is not None:
+        output["rel_volume_basis"] = data_quality.get("rel_volume_basis")
+    bias = row.get("swing_bias") or row.get("bias")
+    if bias:
+        output["swing_bias"] = bias
+    return output
 
 
 def _format_benchmark(data: dict[str, Any]) -> str:
@@ -130,6 +136,10 @@ def _format_candidate_evidence(row: dict[str, Any]) -> str:
         f"as_of={_value(row.get('as_of_et') or row.get('as_of'))}",
         f"sources={_format_sources(row.get('sources'))}",
     ]
+    if row.get("rel_volume_basis") is not None:
+        parts.insert(7, f"rvol_basis={_value(row.get('rel_volume_basis'))}")
+    if row.get("swing_bias"):
+        parts.insert(4, f"bias={_value(row.get('swing_bias'))}")
     caveat = row.get("data_caveat")
     if caveat:
         parts.append(f"caveat={_value(caveat)}")

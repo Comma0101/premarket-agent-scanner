@@ -19,11 +19,13 @@ from app.models import (
     utc_now_iso,
 )
 from services.scanner_service import (
+    REL_VOLUME_BASIS,
     ScannerService,
     compute_gap_dollar,
     compute_gap_pct,
     compute_rel_volume,
     gap_basis_for,
+    rel_volume_basis_for,
 )
 from services.snapshot_service import SnapshotService
 from services.universe_service import UniverseService
@@ -221,6 +223,8 @@ def test_compute_rel_volume():
     assert compute_rel_volume(1_000_000, None) is None
     assert compute_rel_volume(None, 1_000_000) is None
     assert compute_rel_volume(1_000_000, 0) is None
+    assert rel_volume_basis_for(3_000_000, 1_000_000) == REL_VOLUME_BASIS
+    assert rel_volume_basis_for(1_000_000, None) is None
 
 
 def test_resolve_cap_tier_bounds():
@@ -245,6 +249,7 @@ def test_cap_tier_filters_small_cap_gappers():
     out = _service(quotes).scan(tickers="SMOL,NVDA", filters=filters)
     assert [r.ticker for r in out.results] == ["SMOL"]
     assert out.results[0].rel_volume == 5.0
+    assert out.results[0].rel_volume_basis == REL_VOLUME_BASIS
 
 
 def test_min_rel_volume_filter():

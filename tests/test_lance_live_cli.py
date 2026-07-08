@@ -76,6 +76,22 @@ def _payload(summary: str = "1 active monitor, 0 swing watches, 1 blocked/data-c
                     "caveat": "provider failure",
                 }
             ],
+            "ticker_slices": [
+                {
+                    "ticker": "IBM",
+                    "lane": "intraday",
+                    "state": "active_monitor",
+                    "playbook": "mean_reversion",
+                    "data": (
+                        "price=189.25 gap=1.25% rvol=2.1x basis=premarket "
+                        "confidence=OK as_of=Jul 3 9:30 AM ET"
+                    ),
+                    "why": "Right-side turn after capitulation.",
+                    "watch": "hold above prior 2-minute high",
+                    "risk": "breaks prior 2-minute low",
+                    "quality": "confidence=OK / gap_basis=premarket / as_of=Jul 3 9:30 AM ET",
+                }
+            ],
             "omitted": [{"ticker": "ARM", "reason": "filtered out"}],
             "what_would_change": [
                 "Check provider connectivity/credentials before trusting Lance output.",
@@ -224,6 +240,8 @@ def test_lance_live_prints_operator_console_and_writes_handoff(monkeypatch, tmp_
     assert "Active Monitor: IBM" in result.stdout
     assert "Lance Decision Brief" in result.stdout
     assert "posture=stand_down" in result.stdout
+    assert "Auto Slices" in result.stdout
+    assert "slice IBM intraday active_monitor mean_reversion" in result.stdout
     assert "focus IBM intraday active_monitor mean_reversion" in result.stdout
     assert "blocked MU confidence=ERROR / gap_basis=unknown / status=provider_failure" in result.stdout
     assert "Data Lance Used" in result.stdout
@@ -314,3 +332,33 @@ def test_lance_live_watch_carries_previous_payload(monkeypatch, tmp_path):
     assert calls[1]["previous"]["mode"] == "command_center"
     assert (tmp_path / "latest_agent_handoff.md").exists()
     assert (tmp_path / "latest_command_center.json").exists()
+
+
+def test_lance_live_forwards_market_selector_without_defaulting_all_universes(monkeypatch, tmp_path):
+    from cli import lance_live
+
+    def fake_run(**kwargs):
+        assert kwargs["market"] == "us-listed"
+        assert kwargs["market_limit"] == 500
+        assert kwargs["all_universes"] is False
+        assert kwargs["include_caveated_context"] is True
+        return _payload()
+
+    monkeypatch.setattr(lance_live, "run_lance_command_center", fake_run)
+
+    result = runner.invoke(
+        lance_live.app,
+        [
+            "--market",
+            "us-listed",
+            "--market-limit",
+            "500",
+            "--handoff-dir",
+            str(tmp_path),
+            "--no-write-handoff",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert '"mode": "command_center"' in result.stdout

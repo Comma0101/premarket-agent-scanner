@@ -116,6 +116,7 @@ def test_lance_plan_returns_triggered_reference_for_confirmed_long_signal():
     assert plan["conditions"]["prior_bar_break"]["status"] == "PASS"
     assert plan["data_quality"]["confidence"] == "OK"
     assert plan["data_quality"]["gap_basis"] == "last_trade"
+    assert plan["data_quality"]["rel_volume_basis"] == "session_volume_vs_average_daily_volume"
     assert plan["front_side_status"] == "right_side_confirmed"
     assert plan["lance_quality_grade"] == "A_WATCH"
     assert plan["state_reason"] == "Right-side prior 2-minute bar break is confirmed."

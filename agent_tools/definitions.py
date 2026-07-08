@@ -170,6 +170,119 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "run_trading_desk",
+        "description": (
+            "Run the one-call trading desk brief. Composes Lance large/mid-cap "
+            "context and Tim Sykes small-cap context into one read with top "
+            "slices and blocked data. Use this when the user asks for the desk, "
+            "one run, the market right now, or all agents together."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tickers": {
+                    "type": ["array", "string"],
+                    "items": {"type": "string"},
+                    "description": "Explicit tickers, comma-separated or array.",
+                },
+                "universe": {
+                    "type": ["array", "string"],
+                    "items": {"type": "string"},
+                    "description": "Universe name(s).",
+                },
+                "watchlist": {
+                    "type": ["array", "string"],
+                    "items": {"type": "string"},
+                    "description": "Watchlist name(s).",
+                },
+                "market": {
+                    "type": "string",
+                    "enum": ["us-listed"],
+                    "description": "Whole-market source. Defaults to us-listed.",
+                },
+                "market_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Optional cap for smoke tests; omit for full market.",
+                },
+                "max_workers": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Bounded worker count for broad market scans.",
+                },
+                "summary_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum combined top slices to return.",
+                },
+                "persist": {
+                    "type": "boolean",
+                    "description": "Persist Lance session state. Defaults false for quick desk reads.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "run_sykes_live",
+        "description": (
+            "Run the Tim Sykes-style small-cap live/swing watch package. This "
+            "uses the Sykes small-cap scanner, keeps output read-only, and "
+            "returns intraday watch rows, next-session swing watch rows, blocked "
+            "rows, and auto slices. Use this when the user asks what Tim/Sykes "
+            "thinks of the live small-cap market or tomorrow swing watch."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tickers": {
+                    "type": ["array", "string"],
+                    "items": {"type": "string"},
+                    "description": "Explicit tickers, comma-separated or array.",
+                },
+                "universe": {
+                    "type": ["array", "string"],
+                    "items": {"type": "string"},
+                    "description": "Universe name(s).",
+                },
+                "watchlist": {
+                    "type": ["array", "string"],
+                    "items": {"type": "string"},
+                    "description": "Watchlist name(s).",
+                },
+                "market": {
+                    "type": "string",
+                    "enum": ["us-listed"],
+                    "description": "Whole-market source. Defaults to us-listed.",
+                },
+                "market_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Optional cap for smoke tests; omit for full market.",
+                },
+                "max_workers": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Bounded worker count for broad market scans.",
+                },
+                "include_rejected": {
+                    "type": "boolean",
+                    "description": "Include rejected rows under blocked when useful.",
+                },
+                "live_intraday": {
+                    "type": "boolean",
+                    "description": "Defaults true; keep regular-session discovery rows caveated.",
+                },
+                "summary_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum rows per watch block.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "list_universes",
         "description": (
             "List the defined universes and watchlists with their member tickers. "
@@ -395,6 +508,14 @@ TOOLS: list[dict[str, Any]] = [
                     "description": "When true, include every configured universe.",
                     "default": False,
                 },
+                "market": {
+                    "type": ["string", "null"],
+                    "description": "Optional full-market source, e.g. us-listed. Use by itself.",
+                },
+                "market_limit": {
+                    "type": ["integer", "null"],
+                    "description": "Optional cap on market symbols for bounded testing.",
+                },
                 "min_gap_abs": {
                     "type": "number",
                     "description": "Minimum absolute move percentage for intraday Phase 1 discovery.",
@@ -513,6 +634,14 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "boolean",
                     "description": "When true, include every configured universe.",
                     "default": False,
+                },
+                "market": {
+                    "type": ["string", "null"],
+                    "description": "Optional full-market source, e.g. us-listed. Use by itself.",
+                },
+                "market_limit": {
+                    "type": ["integer", "null"],
+                    "description": "Optional cap on market symbols for bounded testing.",
                 },
                 "min_gap_abs": {
                     "type": "number",
@@ -833,6 +962,14 @@ TOOLS: list[dict[str, Any]] = [
                     "description": "When true, scan all configured universes.",
                     "default": False,
                 },
+                "market": {
+                    "type": ["string", "null"],
+                    "description": "Optional full-market source, e.g. us-listed. Use by itself.",
+                },
+                "market_limit": {
+                    "type": ["integer", "null"],
+                    "description": "Optional cap on market symbols for bounded testing.",
+                },
                 "min_gap_abs": {
                     "type": "number",
                     "description": "Minimum absolute move percentage for Phase 1 discovery.",
@@ -929,6 +1066,14 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "boolean",
                     "description": "When true, scan all configured universes.",
                     "default": False,
+                },
+                "market": {
+                    "type": ["string", "null"],
+                    "description": "Optional full-market source, e.g. us-listed. Use by itself.",
+                },
+                "market_limit": {
+                    "type": ["integer", "null"],
+                    "description": "Optional cap on market symbols for bounded testing.",
                 },
                 "min_gap_abs": {
                     "type": "number",
@@ -1117,6 +1262,14 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "boolean",
                     "description": "When true, scan all configured universes.",
                     "default": False,
+                },
+                "market": {
+                    "type": ["string", "null"],
+                    "description": "Optional full-market source, e.g. us-listed. Use by itself.",
+                },
+                "market_limit": {
+                    "type": ["integer", "null"],
+                    "description": "Optional cap on market symbols for bounded testing.",
                 },
                 "min_gap_abs": {
                     "type": "number",
@@ -1425,6 +1578,8 @@ _DISPATCH: dict[str, Callable[..., dict[str, Any]]] = {
     "get_ticker_snapshot": tools.get_ticker_snapshot,
     "scan_breitstein_intraday": tools.scan_breitstein_intraday,
     "build_lance_intraday_plan": tools.build_lance_intraday_plan,
+    "run_trading_desk": tools.run_trading_desk,
+    "run_sykes_live": tools.run_sykes_live,
     "build_lance_swing_plan": tools.build_lance_swing_plan,
     "run_lance_swing_cycle": tools.run_lance_swing_cycle,
     "run_lance_full_cycle": tools.run_lance_full_cycle,

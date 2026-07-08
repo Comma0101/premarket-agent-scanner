@@ -33,6 +33,24 @@ class FakePlanService:
         return self.plans[ticker]
 
 
+class FakeMarketUniverse:
+    def __init__(self, symbols: list[str]) -> None:
+        self.name = "us-listed"
+        self.symbols = symbols
+        self.source = "fake_market"
+        self.notes = ["fake market universe note"]
+
+
+class FakeMarketUniverseProvider:
+    def __init__(self, symbols: list[str]) -> None:
+        self.symbols = symbols
+        self.calls: list[str] = []
+
+    def list_symbols(self, market: str) -> FakeMarketUniverse:
+        self.calls.append(market)
+        return FakeMarketUniverse(self.symbols)
+
+
 def _result(
     ticker: str,
     *,
@@ -176,7 +194,7 @@ def test_lance_market_scan_ranks_triggered_high_participation_candidates_first()
         "Did the setup work, fail, chop, or reverse?"
     ]
     assert "7.0%" in output["watchlist"][0]["why_watching"]
-    assert "4.5x RVOL" in output["watchlist"][0]["why_watching"]
+    assert "4.5x session-volume RVOL" in output["watchlist"][0]["why_watching"]
     assert scanner.calls[0]["tickers"] == ["SLOW", "FAST", "FORM"]
     assert scanner.calls[0]["filters"].include_low_confidence is False
     assert output["triage_context"] == {
@@ -184,6 +202,57 @@ def test_lance_market_scan_ranks_triggered_high_participation_candidates_first()
         "filter_confidence": "OK_ONLY",
         "caveat": None,
     }
+
+
+def test_lance_market_scan_resolves_full_market_before_intraday_triage():
+    scanner = FakeScannerService([
+        _result("IBM", gap_pct=4.0, rel_volume=3.1),
+        _result("DELL", gap_pct=-5.0, rel_volume=3.8),
+    ])
+    market_provider = FakeMarketUniverseProvider(["IBM", "DELL", "MRVL"])
+    plans = {
+        "IBM": _plan("IBM", state="setup_forming", gap_pct=4.0, rel_volume=3.1),
+        "DELL": _plan("DELL", state="triggered_reference", gap_pct=-5.0, rel_volume=3.8),
+    }
+
+    output = LanceMarketScanService(
+        scanner_service=scanner,
+        plan_service=FakePlanService(plans),
+        market_universe_provider=market_provider,
+    ).scan(market="us-listed", market_limit=2, max_candidates=2)
+
+    assert market_provider.calls == ["us-listed"]
+    assert scanner.calls[0]["tickers"] == ["IBM", "DELL"]
+    assert scanner.calls[0]["universe"] is None
+    assert scanner.calls[0]["watchlist"] is None
+    assert scanner.calls[0]["all_universes"] is False
+    assert output["watchlist"][0]["ticker"] == "DELL"
+    assert output["notes"][:3] == [
+        "Market universe us-listed resolved 3 symbol(s) from fake_market.",
+        "Limited market universe to 2 symbol(s) for testing.",
+        "fake market universe note",
+    ]
+
+
+def test_lance_market_scan_does_not_treat_market_symbols_as_manual_fallbacks():
+    scanner = FakeScannerService([_result("DELL", gap_pct=-5.0, rel_volume=3.8)])
+    market_provider = FakeMarketUniverseProvider(["IBM", "DELL", "MRVL"])
+    plan_service = FakePlanService({
+        "IBM": _plan("IBM", state="not_in_play", gap_pct=0.5, rel_volume=0.7),
+        "DELL": _plan("DELL", state="setup_forming", gap_pct=-5.0, rel_volume=3.8),
+        "MRVL": _plan("MRVL", state="not_in_play", gap_pct=0.2, rel_volume=0.8),
+    })
+
+    output = LanceMarketScanService(
+        scanner_service=scanner,
+        plan_service=plan_service,
+        market_universe_provider=market_provider,
+    ).scan(market="us-listed", max_candidates=3)
+
+    assert scanner.calls[0]["tickers"] == ["IBM", "DELL", "MRVL"]
+    assert plan_service.calls == ["DELL"]
+    assert output["candidate_count"] == 1
+    assert [row["ticker"] for row in output["watchlist"]] == ["DELL"]
 
 
 def test_lance_market_scan_session_id_uses_new_york_date_from_scan_start():
