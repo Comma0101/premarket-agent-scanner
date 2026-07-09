@@ -369,3 +369,69 @@ def test_lance_eod_memory_readable_summarizes_playbooks_and_tickers(monkeypatch)
     assert "By Primary Timeframe" in output
     assert "daily_then_intraday total=2 worked=1 failed=1 chop=0 reversed=0 unknown=0 worked_rate=0.5" in output
     assert "Outcome counts are journaled labels" in output
+
+
+def test_lance_eod_summary_saves_daily_json_and_markdown(monkeypatch, tmp_path):
+    from cli import lance_eod
+
+    monkeypatch.setattr(lance_eod, "review_lance_session", lambda **kwargs: _review_payload())
+    monkeypatch.setattr(lance_eod, "summarize_lance_memory", lambda **kwargs: _memory_payload())
+    monkeypatch.setattr(lance_eod, "build_lance_carryover_plan", lambda **kwargs: _carryover_payload())
+
+    result = runner.invoke(
+        lance_eod.app,
+        [
+            "summary",
+            "--session-id",
+            "session-1",
+            "--date",
+            "2026-07-02",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Lance Daily Summary" in result.stdout
+    payload = json.loads((tmp_path / "2026-07-02.json").read_text())
+    assert payload["watched"]["tickers"] == ["MRVL", "IBM"]
+    assert payload["outcomes"]["counts"]["worked"] == 1
+    assert payload["outcomes"]["counts"]["failed"] == 0
+    assert payload["tomorrow_follow_up"] == [
+        {"ticker": "MRVL", "source": "pending_review"},
+        {"ticker": "HOOD", "source": "strength_carryover"},
+        {"ticker": "IBM", "source": "context_only"},
+    ]
+    assert payload["tim_sykes"]["status"] == "unknown"
+    markdown = (tmp_path / "2026-07-02.md").read_text()
+    assert "Daily Trading Summary - 2026-07-02" in markdown
+    assert "Tim/Sykes session persistence is not wired" in markdown
+
+
+def test_lance_eod_summary_marks_old_session_as_prep_only(monkeypatch, tmp_path):
+    from cli import lance_eod
+
+    review = _review_payload()
+    review["session_id"] = "2026-07-02-live-clean-lance-intraday"
+    monkeypatch.setattr(lance_eod, "review_lance_session", lambda **kwargs: review)
+    monkeypatch.setattr(lance_eod, "summarize_lance_memory", lambda **kwargs: _memory_payload())
+    monkeypatch.setattr(lance_eod, "build_lance_carryover_plan", lambda **kwargs: _carryover_payload())
+
+    result = runner.invoke(
+        lance_eod.app,
+        [
+            "summary",
+            "--date",
+            "2026-07-08",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Live session captured: no" in result.stdout
+    payload = json.loads((tmp_path / "2026-07-08.json").read_text())
+    assert payload["status"] == "PREP_ONLY"
+    assert payload["live_session_captured"] is False
+    assert payload["source_session_date"] == "2026-07-02"
+    assert "No live Lance session captured for 2026-07-08" in payload["notes"][0]

@@ -10,6 +10,7 @@ __pycache__/
 .DS_Store
 data/*.sqlite
 data/*.sqlite-*
+data/daily_summaries/
 data/live_sessions/
 exports/
 .gitnexus/

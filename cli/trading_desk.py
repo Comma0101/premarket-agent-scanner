@@ -40,6 +40,10 @@ def main(
 
 
 def _render(output: dict[str, Any]) -> None:
+    if output.get("operator_brief"):
+        typer.echo(str(output["operator_brief"]))
+        return
+
     typer.echo("Trading Desk One Run")
     if output.get("session_banner"):
         typer.echo(str(output["session_banner"]))

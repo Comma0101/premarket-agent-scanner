@@ -41,6 +41,13 @@ def test_trading_desk_one_run_combines_lance_and_sykes_slices():
         {"agent": "lance", "ticker": "BAD"},
         {"agent": "tim_sykes", "ticker": "CAVEAT"},
     ]
+    assert output["data_used"]["lance"]["summary"] == "1 candidate row, 1 benchmark row."
+    assert output["data_used"]["tim_sykes"]["scanner"]["candidate_count"] == 1
+    assert output["next_actions"] == ["cmd now"]
+    assert "Trading Desk Operator Brief" in output["operator_brief"]
+    assert "## Data Used" in output["operator_brief"]
+    assert "IBM: price=100" in output["operator_brief"]
+    assert "Tim/Sykes scanner: preset=sykes_small_cap_v0 candidates=1" in output["operator_brief"]
     assert output["agents"]["lance"]["agent_name"] == "lance_full_cycle"
     assert output["agents"]["tim_sykes"]["agent_name"] == "timothy_sykes"
     assert output["disclaimer"] == "Matches your filter - not buy/sell advice. Verify before acting."
@@ -72,6 +79,21 @@ class FakeLanceService:
                 ],
                 "blocked": [{"ticker": "BAD"}],
             },
+            "data_used": {
+                "summary": "1 candidate row, 1 benchmark row.",
+                "candidate_rows": [
+                    {
+                        "ticker": "IBM",
+                        "latest_price": 100,
+                        "gap_pct": 2.0,
+                        "rel_volume": 1.5,
+                        "gap_basis": "last_trade",
+                        "confidence": "OK",
+                        "as_of_et": "Jul 8 3:00 PM ET",
+                    }
+                ],
+            },
+            "workflow_commands": {"now": "cmd now"},
         }
 
 
@@ -99,4 +121,10 @@ class FakeSykesService:
                 }
             ],
             "blocked": [{"ticker": "CAVEAT"}],
+            "scanner": {
+                "preset": "sykes_small_cap_v0",
+                "candidate_count": 1,
+                "rejected_count": 0,
+                "live_intraday": True,
+            },
         }

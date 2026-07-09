@@ -18,6 +18,7 @@ def test_trading_desk_cli_runs_one_desk(monkeypatch):
                 "status": "OK",
                 "session_banner": "MARKET_OPEN desk",
                 "desk_read": {"one_liner": "Lance: 1 active. Tim: 1 watch."},
+                "operator_brief": "# Trading Desk Operator Brief\n\n## Desk Read\nLance: 1 active. Tim: 1 watch.",
                 "top_slices": [
                     {
                         "agent": "lance",
@@ -43,9 +44,8 @@ def test_trading_desk_cli_runs_one_desk(monkeypatch):
     assert calls["market"] == "us-listed"
     assert calls["market_limit"] == 25
     assert calls["max_workers"] == 3
-    assert "Trading Desk One Run" in result.stdout
-    assert "slice lance IBM intraday watching mean_reversion" in result.stdout
-    assert "blocked tim_sykes BAD" in result.stdout
+    assert "Trading Desk Operator Brief" in result.stdout
+    assert "Lance: 1 active. Tim: 1 watch." in result.stdout
 
 
 def test_trading_desk_cli_json(monkeypatch):

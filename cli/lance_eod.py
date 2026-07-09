@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
+from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import typer
 
@@ -102,6 +105,44 @@ def memory_command(
     _render_memory(payload)
 
 
+@app.command("summary")
+def summary_command(
+    session_id: str | None = typer.Option(None, "--session-id", help="Lance session id."),
+    summary_date: str | None = typer.Option(None, "--date", help="Summary date, YYYY-MM-DD."),
+    output_dir: Path = typer.Option(
+        Path("data/daily_summaries"),
+        "--output-dir",
+        help="Directory for saved JSON and Markdown summaries.",
+    ),
+    limit: int = typer.Option(500, "--limit", help="Maximum rows/events to inspect."),
+    json_output: bool = typer.Option(False, "--json", help="Print raw JSON."),
+) -> None:
+    review = review_lance_session(session_id=session_id, limit=limit)
+    resolved_session_id = review.get("session_id") or session_id
+    memory = summarize_lance_memory(
+        session_id=str(resolved_session_id) if resolved_session_id else None,
+        limit=limit,
+    )
+    carryover = build_lance_carryover_plan(
+        session_id=str(resolved_session_id) if resolved_session_id else None,
+        target_session_date=None,
+        limit=limit,
+    )
+    payload = _daily_summary_payload(
+        summary_date or _today_ny(),
+        str(resolved_session_id) if resolved_session_id else None,
+        review,
+        memory,
+        carryover,
+        output_dir,
+    )
+    _write_daily_summary(payload)
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+    _render_daily_summary(payload)
+
+
 def _render_review(payload: dict[str, Any]) -> None:
     typer.echo("")
     typer.echo("Lance EOD Review:")
@@ -164,6 +205,239 @@ def _render_memory(payload: dict[str, Any]) -> None:
     _render_memory_rows(payload.get("by_primary_timeframe") or [], "primary_timeframe")
     _render_notes(payload.get("notes") or [])
     _render_disclaimer(payload)
+
+
+def _render_daily_summary(payload: dict[str, Any]) -> None:
+    typer.echo("")
+    typer.echo("Lance Daily Summary:")
+    typer.echo(f"Date: {_value(payload.get('date'))}")
+    typer.echo(f"Session: {_value(payload.get('session_id'))}")
+    typer.echo(f"Live session captured: {_yes_no(payload.get('live_session_captured'))}")
+    watched = payload.get("watched") or {}
+    typer.echo(
+        f"Watched: tickers={_value(watched.get('ticker_count'))} "
+        f"pending={_value(watched.get('pending_count'))} "
+        f"reviewed={_value(watched.get('reviewed_count'))}"
+    )
+    outcomes = payload.get("outcomes") or {}
+    counts = outcomes.get("counts") or {}
+    typer.echo(
+        "Outcomes: "
+        f"worked={_value(counts.get('worked'))} failed={_value(counts.get('failed'))} "
+        f"chop={_value(counts.get('chop'))} reversed={_value(counts.get('reversed'))} "
+        f"unknown={_value(counts.get('unknown'))}"
+    )
+    typer.echo("")
+    typer.echo("Tomorrow Follow-Up:")
+    follow_up = payload.get("tomorrow_follow_up") or []
+    if not follow_up:
+        typer.echo("- none")
+    for row in follow_up:
+        typer.echo(f"- {_value(row.get('ticker'))} source={_value(row.get('source'))}")
+    _render_notes(payload.get("notes") or [])
+    typer.echo("")
+    typer.echo("Files:")
+    files = payload.get("files") or {}
+    typer.echo(f"- json: {_value(files.get('json'))}")
+    typer.echo(f"- markdown: {_value(files.get('markdown'))}")
+    _render_disclaimer(payload)
+
+
+def _daily_summary_payload(
+    summary_date: str,
+    session_id: str | None,
+    review: dict[str, Any],
+    memory: dict[str, Any],
+    carryover: dict[str, Any],
+    output_dir: Path,
+) -> dict[str, Any]:
+    json_path = output_dir / f"{summary_date}.json"
+    markdown_path = output_dir / f"{summary_date}.md"
+    pending = review.get("pending_reviews") if isinstance(review.get("pending_reviews"), list) else []
+    reviewed = review.get("reviewed") if isinstance(review.get("reviewed"), list) else []
+    source_session_date = _session_date(session_id)
+    live_session_captured = source_session_date in {None, summary_date}
+    notes = []
+    if not live_session_captured:
+        notes.append(
+            f"No live Lance session captured for {summary_date}; using latest persisted session {session_id} for prep/carryover only."
+        )
+    return {
+        "agent_name": "lance_eod",
+        "mode": "daily_summary",
+        "date": summary_date,
+        "session_id": session_id,
+        "source_session_date": source_session_date,
+        "live_session_captured": live_session_captured,
+        "status": _summary_status(review, memory, carryover) if live_session_captured else "PREP_ONLY",
+        "watched": {
+            "ticker_count": review.get("ticker_count"),
+            "pending_count": review.get("pending_count"),
+            "reviewed_count": review.get("reviewed_count"),
+            "tickers": _dedupe_tickers([*pending, *reviewed]),
+        },
+        "outcomes": {
+            "outcome_count": memory.get("outcome_count"),
+            "counts": _outcome_counts(memory.get("recent_outcomes") or []),
+            "by_playbook": memory.get("by_playbook") or [],
+            "by_ticker": memory.get("by_ticker") or [],
+        },
+        "tomorrow_follow_up": _tomorrow_follow_up(pending, carryover),
+        "market_context": {
+            "regime": "unknown",
+            "themes": [],
+            "note": "No persisted market-regime snapshot is attached to the EOD summary yet.",
+        },
+        "tim_sykes": {
+            "status": "unknown",
+            "tickers": [],
+            "note": "Tim/Sykes session persistence is not wired into EOD summaries yet.",
+        },
+        "source_reports": {
+            "review": review,
+            "memory": memory,
+            "carryover": carryover,
+        },
+        "files": {
+            "json": str(json_path),
+            "markdown": str(markdown_path),
+        },
+        "notes": notes,
+        "disclaimer": DISCLAIMER,
+    }
+
+
+def _write_daily_summary(payload: dict[str, Any]) -> None:
+    files = payload["files"]
+    json_path = Path(files["json"])
+    markdown_path = Path(files["markdown"])
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text(_daily_summary_markdown(payload), encoding="utf-8")
+
+
+def _daily_summary_markdown(payload: dict[str, Any]) -> str:
+    watched = payload.get("watched") or {}
+    outcomes = payload.get("outcomes") or {}
+    counts = outcomes.get("counts") or {}
+    follow_up = payload.get("tomorrow_follow_up") or []
+    lines = [
+        f"# Daily Trading Summary - {_value(payload.get('date'))}",
+        "",
+        f"- Session: {_value(payload.get('session_id'))}",
+        f"- Live session captured: {_yes_no(payload.get('live_session_captured'))}",
+        f"- Status: {_value(payload.get('status'))}",
+        f"- Watched: {_value(watched.get('ticker_count'))} ticker(s), "
+        f"{_value(watched.get('pending_count'))} pending, "
+        f"{_value(watched.get('reviewed_count'))} reviewed",
+        f"- Outcomes: worked={_value(counts.get('worked'))}, "
+        f"failed={_value(counts.get('failed'))}, chop={_value(counts.get('chop'))}, "
+        f"reversed={_value(counts.get('reversed'))}, unknown={_value(counts.get('unknown'))}",
+        "",
+        "## Tomorrow Follow-Up",
+    ]
+    lines.extend(
+        [f"- {_value(row.get('ticker'))} ({_value(row.get('source'))})" for row in follow_up]
+        or ["- none"]
+    )
+    notes = payload.get("notes") or []
+    if notes:
+        lines.extend(["", "## Notes", *[f"- {note}" for note in notes]])
+    lines.extend([
+        "",
+        "## Data Used",
+        "- review_lance_session",
+        "- summarize_lance_memory",
+        "- build_lance_carryover_plan",
+        "",
+        "## Tim/Sykes",
+        f"- {_value((payload.get('tim_sykes') or {}).get('note'))}",
+        "",
+        DISCLAIMER,
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def _summary_status(*payloads: dict[str, Any]) -> str:
+    statuses = {str(payload.get("status") or "UNKNOWN") for payload in payloads}
+    if statuses <= {"OK"}:
+        return "OK"
+    if "OK" in statuses:
+        return "PARTIAL"
+    if "ERROR" in statuses:
+        return "ERROR"
+    return "EMPTY"
+
+
+def _outcome_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {key: 0 for key in ["worked", "failed", "chop", "reversed", "unknown"]}
+    for row in rows:
+        outcome = str(row.get("outcome") or "unknown")
+        counts[outcome if outcome in counts else "unknown"] += 1
+    return counts
+
+
+def _tomorrow_follow_up(
+    pending: list[dict[str, Any]],
+    carryover: dict[str, Any],
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for row in pending:
+        ticker = row.get("ticker")
+        if ticker:
+            rows.append({"ticker": str(ticker), "source": "pending_review"})
+    groups = carryover.get("groups") if isinstance(carryover.get("groups"), dict) else {}
+    for group_name, group_rows in groups.items():
+        if not isinstance(group_rows, list):
+            continue
+        for row in group_rows:
+            if isinstance(row, dict) and row.get("ticker"):
+                rows.append({"ticker": str(row["ticker"]), "source": str(group_name)})
+    return _dedupe_follow_up(rows)
+
+
+def _dedupe_tickers(rows: list[dict[str, Any]]) -> list[str]:
+    return [row["ticker"] for row in _dedupe_follow_up([
+        {"ticker": str(row["ticker"]), "source": ""}
+        for row in rows
+        if isinstance(row, dict) and row.get("ticker")
+    ])]
+
+
+def _dedupe_follow_up(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    output = []
+    seen = set()
+    for row in rows:
+        ticker = row["ticker"].upper()
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        output.append({"ticker": ticker, "source": row["source"]})
+    return output
+
+
+def _today_ny() -> str:
+    return datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+
+
+def _session_date(session_id: str | None) -> str | None:
+    if not session_id or len(session_id) < 10:
+        return None
+    value = session_id[:10]
+    try:
+        datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return value
+
+
+def _yes_no(value: Any) -> str:
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return "unknown"
 
 
 def _render_memory_rows(rows: list[dict[str, Any]], label: str) -> None:
